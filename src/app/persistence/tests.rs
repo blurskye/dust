@@ -821,7 +821,7 @@ fn jumps_into_a_tutor_practice_project_are_not_saved() {
         scroll_column: 0,
     };
     let own = location(std::path::PathBuf::from("/work/tally/src/main.rs"));
-    let lesson = location(std::env::temp_dir().join("dust-tutor-Iefcko/practice.rs"));
+    let lesson = location(std::env::temp_dir().join("dusty-tutor-Iefcko/practice.rs"));
     assert_eq!(
         super::outside_practice_projects(&[lesson, own.clone()]),
         [own]

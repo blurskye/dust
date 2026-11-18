@@ -6,27 +6,27 @@
 #[path = "support/forge_fake.rs"]
 mod forge_fake;
 
-use dust::forge::cli;
-use dust::forge::credential::Credential;
-use dust::forge::credential::CredentialSource;
-use dust::forge::credential::CredentialState;
-use dust::forge::credential::Env;
-use dust::forge::credential::Secret;
-use dust::forge::credential::Stores;
-use dust::forge::detect;
-use dust::forge::detect::DetectInputs;
-use dust::forge::detect::ForgeConfig;
-use dust::forge::host_state;
-use dust::forge::http::HttpTransport;
-use dust::forge::provider::ForgeContext;
-use dust::forge::provider::ProviderKind;
-use dust::forge::redact;
-use dust::forge::transport;
-use dust::forge::transport::ApiRequest;
-use dust::forge::transport::Cli;
-use dust::forge::transport::ConnectOptions;
-use dust::forge::transport::Endpoints;
-use dust::forge::transport::HostKey;
+use dusty::forge::cli;
+use dusty::forge::credential::Credential;
+use dusty::forge::credential::CredentialSource;
+use dusty::forge::credential::CredentialState;
+use dusty::forge::credential::Env;
+use dusty::forge::credential::Secret;
+use dusty::forge::credential::Stores;
+use dusty::forge::detect;
+use dusty::forge::detect::DetectInputs;
+use dusty::forge::detect::ForgeConfig;
+use dusty::forge::host_state;
+use dusty::forge::http::HttpTransport;
+use dusty::forge::provider::ForgeContext;
+use dusty::forge::provider::ProviderKind;
+use dusty::forge::redact;
+use dusty::forge::transport;
+use dusty::forge::transport::ApiRequest;
+use dusty::forge::transport::Cli;
+use dusty::forge::transport::ConnectOptions;
+use dusty::forge::transport::Endpoints;
+use dusty::forge::transport::HostKey;
 use forge_fake::ForgeServer;
 use serde_json::Value;
 use serde_json::json;
@@ -172,7 +172,7 @@ fn echoed_tokens_never_reach_error_text_or_host_states() {
         let response = ctx
             .send(&ApiRequest::get(path), &AtomicBool::new(false))
             .unwrap();
-        let error = dust::forge::http::classify(&world.endpoints(kind, host), &response);
+        let error = dusty::forge::http::classify(&world.endpoints(kind, host), &response);
         let text = format!("{error} {error:?}");
         assert!(!text.contains(token), "{kind:?}: {text}");
         let account = host_state::account(&HostKey::new(host)).unwrap();

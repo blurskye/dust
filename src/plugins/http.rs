@@ -1,7 +1,7 @@
 //! Bounded HTTPS requests to manifest-approved hosts, off the editor thread.
 
 use super::PluginLoadId;
-use super::component::component_api::dust::plugin::host as wit;
+use super::component::component_api::dusty::plugin::host as wit;
 use std::collections::BTreeSet;
 use std::io::Read;
 use std::sync::mpsc::{self, Receiver, SyncSender};
@@ -32,7 +32,7 @@ impl PluginHttp {
         let (sender, requests) = mpsc::sync_channel::<Request>(16);
         let (replies, receiver) = mpsc::sync_channel(16);
         std::thread::Builder::new()
-            .name("dust-plugin-http".into())
+            .name("dusty-plugin-http".into())
             .spawn(move || {
                 while let Ok(request) = requests.recv() {
                     let mut response = wit::HttpResponse {

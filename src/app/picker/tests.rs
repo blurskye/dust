@@ -228,7 +228,7 @@ fn palette_finds_commands_by_the_words_people_type() {
         ("color", "Select Color Theme"),
         ("colorscheme", "Select Color Theme"),
         ("mason", "Tool Manager"),
-        ("quit dust", "Quit Dust"),
+        ("quit dusty", "Quit Dusty"),
         ("close buffer", "Close buffer"),
         ("rename symbol", "Rename symbol"),
         ("open settings", "Open Settings"),
@@ -267,7 +267,7 @@ fn palette_runs_flagged_commands_with_the_flag_off() {
         .open_text(TextBuffer::from_text("unsaved\n"), None)
         .unwrap();
     app.state.buffers[buffer].dirty = true;
-    palette_row_for(&mut app, "quit dust");
+    palette_row_for(&mut app, "quit dusty");
     app.accept_picker();
     assert!(!app.should_quit, "ordinary quit refuses unsaved changes");
     assert!(app.ui.notification_error);

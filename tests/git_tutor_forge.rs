@@ -5,9 +5,9 @@
 //! One test only: the forge sandbox is process-wide. `scripts/.tutor-run.sh` runs it with
 //! decoy credentials and a decoy API base in the environment; the lessons still pass because
 //! the sandbox never reads them.
-use dust::editor::input::{KeyCode, KeyEvent, Modifiers};
-use dust::git::screen::GitScreen;
-use dust::ui::{Frame, KeyInputKind, UiEvent};
+use dusty::editor::input::{KeyCode, KeyEvent, Modifiers};
+use dusty::git::screen::GitScreen;
+use dusty::ui::{Frame, KeyInputKind, UiEvent};
 use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -207,7 +207,7 @@ fn every_forge_lesson_advances_on_real_input_against_the_practice_forge() {
     let mut screen = GitScreen::open(dir.path()).unwrap();
     let s = &mut screen;
     shows(s, "Initial commit");
-    assert!(!dust::forge::sandbox::active());
+    assert!(!dusty::forge::sandbox::active());
     char(s, '?');
     assert!(view(s).contains(":tutor forge"), "{}", view(s));
     key(s, KeyCode::Escape);
@@ -216,7 +216,7 @@ fn every_forge_lesson_advances_on_real_input_against_the_practice_forge() {
     assert!(view(s).contains("tutor forge [N]"), "{}", view(s));
     command(s, "tutor forge");
     lesson(s, "Pull requests · Open the tab");
-    assert!(dust::forge::sandbox::active());
+    assert!(dusty::forge::sandbox::active());
     assert!(banner(s).contains(&format!("1/{}", total())));
     assert!(
         view(s).contains("Practice forge on this computer"),
@@ -590,7 +590,7 @@ fn every_forge_lesson_advances_on_real_input_against_the_practice_forge() {
     // `q` on a forge tab leaves the tutor, the practice forge and the sandbox.
     char(s, 'q');
     wait(s, "the user's workspace", |s| !s.in_tutor());
-    assert!(!dust::forge::sandbox::active());
+    assert!(!dusty::forge::sandbox::active());
     assert_eq!(
         s.root().canonicalize().unwrap(),
         dir.path().canonicalize().unwrap()
@@ -617,5 +617,5 @@ fn every_forge_lesson_advances_on_real_input_against_the_practice_forge() {
     assert!(!banner(s).contains('✓'), "{}", view(s));
     command(s, "tutor quit");
     wait(s, "the user's workspace", |s| !s.in_tutor());
-    assert!(!dust::forge::sandbox::active());
+    assert!(!dusty::forge::sandbox::active());
 }

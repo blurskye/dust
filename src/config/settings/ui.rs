@@ -408,7 +408,7 @@ pub struct UiConfig {
 impl Default for UiConfig {
     fn default() -> Self {
         Self {
-            theme: "dust".into(),
+            theme: "dusty".into(),
             color_mode: ColorMode::Auto,
             mouse: true,
             command_line: CommandLineConfig::default(),

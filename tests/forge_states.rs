@@ -10,9 +10,9 @@ mod forge_fake;
 #[path = "support/forge_world.rs"]
 mod forge_world;
 
-use dust::editor::input::{KeyCode, KeyEvent};
-use dust::git::screen::GitScreen;
-use dust::ui::{KeyInputKind, UiEvent};
+use dusty::editor::input::{KeyCode, KeyEvent};
+use dusty::git::screen::GitScreen;
+use dusty::ui::{KeyInputKind, UiEvent};
 use forge_fake::FAKE_TOKEN;
 use forge_world::{Forge, World};
 use serde_json::{Value, json};
@@ -629,7 +629,7 @@ fn control(screen: &mut GitScreen, code: KeyCode) {
     screen.event(UiEvent::Key {
         key: KeyEvent {
             code,
-            modifiers: dust::editor::input::Modifiers {
+            modifiers: dusty::editor::input::Modifiers {
                 control: true,
                 ..Default::default()
             },

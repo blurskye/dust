@@ -3,7 +3,7 @@ mod greet;
 use greet::{hello, shout};
 
 fn main() {
-    let name = "Dust";
+    let name = "Dusty";
     let message = hello(name);
     println!("{}", message);
     let unused = 42;

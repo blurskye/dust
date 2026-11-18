@@ -1,6 +1,6 @@
 //! Bounded editor requests and deliveries crossing the component worker.
 
-use super::component::component_api::dust::plugin::host as wit;
+use super::component::component_api::dusty::plugin::host as wit;
 use super::manifest::PluginCapability;
 
 pub(crate) const REQUEST_LIMIT: usize = 64;

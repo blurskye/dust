@@ -30,7 +30,7 @@ pub fn create(parent: &Path, name: &str) -> Result<PathBuf, ScaffoldError> {
                 env!("CARGO_MANIFEST_DIR"),
                 "/examples/plugins/completion/Cargo.toml"
             ))
-            .replace("dust-example-completion", &format!("dust-plugin-{name}")),
+            .replace("dusty-example-completion", &format!("dusty-plugin-{name}")),
         ),
         (
             "Cargo.lock",
@@ -38,7 +38,7 @@ pub fn create(parent: &Path, name: &str) -> Result<PathBuf, ScaffoldError> {
                 env!("CARGO_MANIFEST_DIR"),
                 "/examples/plugins/completion/Cargo.lock"
             ))
-            .replace("dust-example-completion", &format!("dust-plugin-{name}")),
+            .replace("dusty-example-completion", &format!("dusty-plugin-{name}")),
         ),
         (
             "src/lib.rs",
@@ -49,8 +49,8 @@ pub fn create(parent: &Path, name: &str) -> Result<PathBuf, ScaffoldError> {
             .replace("../../../wit", "wit"),
         ),
         (
-            "wit/dust-plugin.wit",
-            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/wit/dust-plugin.wit")).to_owned(),
+            "wit/dusty-plugin.wit",
+            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/wit/dusty-plugin.wit")).to_owned(),
         ),
         (
             "manifest.toml",
@@ -89,7 +89,7 @@ mod tests {
             toml::from_str(&fs::read_to_string(directory.join("Cargo.toml")).unwrap()).unwrap();
         assert_eq!(
             cargo["package"]["name"].as_str(),
-            Some("dust-plugin-mywords")
+            Some("dusty-plugin-mywords")
         );
         assert_eq!(cargo["lib"]["crate-type"][0].as_str(), Some("cdylib"));
         let manifest: crate::plugins::PluginManifest =
@@ -110,8 +110,8 @@ mod tests {
             .replace("../../../wit", "wit")
         );
         assert_eq!(
-            fs::read_to_string(directory.join("wit/dust-plugin.wit")).unwrap(),
-            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/wit/dust-plugin.wit"))
+            fs::read_to_string(directory.join("wit/dusty-plugin.wit")).unwrap(),
+            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/wit/dusty-plugin.wit"))
         );
     }
 

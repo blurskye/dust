@@ -87,7 +87,7 @@ impl ProjectRootWorker {
         let (sender, receiver) = mpsc::sync_channel(1);
         let worker_document = document.clone();
         thread::Builder::new()
-            .name(format!("dust-project-root-{request_id}"))
+            .name(format!("dusty-project-root-{request_id}"))
             .spawn(move || {
                 let result = resolve_project_root(
                     request_id,

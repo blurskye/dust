@@ -318,7 +318,7 @@ impl App {
         }
         if self.configuration.user_settings_path().is_none() {
             return Err(
-                "Dust started without a user configuration, so nothing can be saved".into(),
+                "Dusty started without a user configuration, so nothing can be saved".into(),
             );
         }
         let path = crate::config::user_keymaps_path();

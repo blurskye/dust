@@ -1639,7 +1639,7 @@ def serve(sock,child):
    if child: send({'type':'event','event':'stopped','body':{'reason':'breakpoint','threadId':7}})
    else: send({'type':'request','command':'startDebugging','arguments':{'request':'attach','configuration':{'type':'pwa-node','__pendingTargetId':'fixture-target'}}})
   if c=='disconnect':
-   # Close after Dust does: Windows drops unread data when a peer resets the connection.
+   # Close after Dusty does: Windows drops unread data when a peer resets the connection.
    try:
     while stream.read(4096): pass
    except OSError: pass

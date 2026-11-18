@@ -15,7 +15,7 @@ use crate::ui::render::composition_tests::ui_with_editor_layout;
 
 #[test]
 fn completion_attaches_below_globally_centered_prompt() {
-    let state = EditorState::new(PathBuf::from("/tmp/dust-workspace"));
+    let state = EditorState::new(PathBuf::from("/tmp/dusty-workspace"));
     let mut prompt = PromptState::new(PromptKind::Command);
     prompt.input = "e".into();
     prompt.cursor = 1;
@@ -61,7 +61,7 @@ fn completion_attaches_below_globally_centered_prompt() {
 
 #[test]
 fn prompt_completion_viewport_follows_a_selected_item_beyond_its_first_page() {
-    let state = EditorState::new(PathBuf::from("/tmp/dust-workspace"));
+    let state = EditorState::new(PathBuf::from("/tmp/dusty-workspace"));
     let mut prompt = PromptState::new(PromptKind::Command);
     let count = usize::from(crate::ui::render::COMPLETION_MAX_ROWS) * 2;
     prompt.completions = (0..count)

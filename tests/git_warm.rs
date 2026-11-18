@@ -9,7 +9,7 @@
 //! - Warm, another HEAD: History and the branches still paint from the cache, but Changes
 //!   reads as loading rather than listing another HEAD's changes.
 
-use dust::git::screen::GitScreen;
+use dusty::git::screen::GitScreen;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};

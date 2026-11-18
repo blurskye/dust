@@ -1,6 +1,6 @@
 //! Real repositories only: immutable rewrite plans, native commit machinery,
 //! byte-exact index/worktree preservation and retained recovery objects.
-use dust::git::rewrite::{Kind, Outcome, Plan, Worker};
+use dusty::git::rewrite::{Kind, Outcome, Plan, Worker};
 use git2::Oid;
 use std::fs;
 use std::path::Path;
@@ -103,7 +103,7 @@ fn assert_no_locks(root: &Path) {
     }
 }
 fn assert_compact_rewrite_form(
-    screen: &mut dust::git::screen::GitScreen,
+    screen: &mut dusty::git::screen::GitScreen,
     title: &str,
     source: bool,
 ) {
@@ -145,7 +145,7 @@ fn assert_compact_rewrite_form(
         "Staged-content policy",
         "autosquash",
         "undo source",
-        "refs/dust/",
+        "refs/dusty/",
         "captured staged",
         "keep unstaged",
         "(pinned)",
@@ -514,7 +514,7 @@ fn hook_tree_change_is_refused_before_publication_and_prepared_commit_is_recover
         &[
             "for-each-ref",
             "--format=%(refname)",
-            "refs/dust/rewrite-result/",
+            "refs/dusty/rewrite-result/",
         ],
     );
     assert!(!refs.is_empty());
@@ -623,9 +623,9 @@ fn reword_preserves_staged_deletion_and_intent_to_add_bytes() {
 
 #[test]
 fn screen_bindings_host_veto_stale_form_and_retry_preserve_draft() {
-    use dust::editor::input::{KeyCode, KeyEvent, Modifiers};
-    use dust::git::screen::GitScreen;
-    use dust::ui::{KeyInputKind, UiEvent};
+    use dusty::editor::input::{KeyCode, KeyEvent, Modifiers};
+    use dusty::git::screen::GitScreen;
+    use dusty::ui::{KeyInputKind, UiEvent};
     fn key(screen: &mut GitScreen, c: char, control: bool) {
         screen.event(UiEvent::Key {
             key: KeyEvent {
@@ -781,9 +781,9 @@ fn empty_message_is_refused_before_acceptance_and_empty_root_can_be_reworded() {
 
 #[test]
 fn screen_fixup_binding_uses_selected_history_row_not_head() {
-    use dust::editor::input::{KeyCode, KeyEvent, Modifiers};
-    use dust::git::screen::GitScreen;
-    use dust::ui::{KeyInputKind, UiEvent};
+    use dusty::editor::input::{KeyCode, KeyEvent, Modifiers};
+    use dusty::git::screen::GitScreen;
+    use dusty::ui::{KeyInputKind, UiEvent};
     fn press(screen: &mut GitScreen, code: KeyCode) {
         screen.event(UiEvent::Key {
             key: KeyEvent::plain(code),
@@ -859,7 +859,7 @@ fn screen_fixup_binding_uses_selected_history_row_not_head() {
         "{rendered}"
     );
     assert!(
-        !rendered.contains("undo source") && !rendered.contains("refs/dust/"),
+        !rendered.contains("undo source") && !rendered.contains("refs/dusty/"),
         "{rendered}"
     );
 }
@@ -914,7 +914,10 @@ fn reference_transaction_policy_is_refused_not_silently_bypassed() {
     assert_eq!(head(root), before);
     assert_eq!(index(root), bytes);
     assert_eq!(
-        text(root, &["for-each-ref", "--format=%(refname)", "refs/dust/"]),
+        text(
+            root,
+            &["for-each-ref", "--format=%(refname)", "refs/dusty/"]
+        ),
         ""
     );
     assert_no_locks(root);
@@ -1242,8 +1245,8 @@ fn disabled_reflog_write_error_retains_foreign_lock_and_recovery_diagnostic() {
         "{error}"
     );
     assert!(
-        error.contains("refs/dust/rewrite-result/")
-            && error.contains(&format!("refs/dust/rewrite/{original}")),
+        error.contains("refs/dusty/rewrite-result/")
+            && error.contains(&format!("refs/dusty/rewrite/{original}")),
         "{error}"
     );
     assert_eq!(head(root), original);
@@ -1258,7 +1261,7 @@ fn disabled_reflog_write_error_retains_foreign_lock_and_recovery_diagnostic() {
     let prepared = partial_log.get(0).unwrap().id_new();
     assert_ne!(prepared, original);
     assert_eq!(partial_log.get(0).unwrap().id_old(), original);
-    let prepared_ref = format!("refs/dust/rewrite-result/{prepared}");
+    let prepared_ref = format!("refs/dusty/rewrite-result/{prepared}");
     assert_eq!(repository.refname_to_id(&prepared_ref).unwrap(), prepared);
     assert!(repository.find_commit(prepared).is_ok());
     assert!(error.contains(&prepared_ref), "{error}");
@@ -1363,7 +1366,7 @@ fn check_noncanonical_raw_reflogs(checkout: &str, skipped_line: bool) {
         .unwrap();
     let mut expected_tail = format!("{original} {} ", outcome.head).into_bytes();
     expected_tail.extend_from_slice(committer);
-    expected_tail.extend_from_slice(b"\tdust: local commit rewrite\n");
+    expected_tail.extend_from_slice(b"\tdusty: local commit rewrite\n");
     for (name, path, prefix, parsed) in snapshots {
         let actual = fs::read(path).unwrap();
         assert!(

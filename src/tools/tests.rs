@@ -100,7 +100,7 @@ fn bundled_catalog_is_typed_and_has_real_language_and_debug_tools() {
             .count(),
         3
     );
-    // Dust only offers Nix runtimes on Unix.
+    // Dusty only offers Nix runtimes on Unix.
     assert!(
         catalog
             .iter()
@@ -209,7 +209,7 @@ fn managed_tool_records_the_exact_activated_catalog_version() {
 }
 
 #[test]
-fn catalog_uses_dust_managed_installation_methods_not_system_programs() {
+fn catalog_uses_dusty_managed_installation_methods_not_system_programs() {
     let catalog = bundled_tool_catalog();
     assert!(catalog.iter().all(|tool| !matches!(
         tool.install,
@@ -260,14 +260,14 @@ fn nixos_host_detection_accepts_only_the_exact_os_release_id() {
 }
 
 #[test]
-fn private_nix_workspace_contains_only_dust_pinned_flake_inputs() {
+fn private_nix_workspace_contains_only_dusty_pinned_flake_inputs() {
     let directory = tempfile::tempdir().expect("tool store");
     let workspace = prepare_nix_lsp_workspace_at(&directory.path().join("nix-workspace"))
         .expect("Nix workspace");
     let flake = std::fs::read_to_string(workspace.join("flake.nix")).expect("flake source");
     let lock = std::fs::read_to_string(workspace.join("flake.lock")).expect("flake lock");
     assert!(workspace.join("profiles").is_dir());
-    assert!(flake.contains("Dust-owned Linux executable compatibility runtime"));
+    assert!(flake.contains("Dusty-owned Linux executable compatibility runtime"));
     assert!(flake.contains("compat-runtime"));
     assert!(!flake.contains("rust-analyzer ="));
     assert!(lock.contains("b6018f87da91d19d0ab4cf979885689b469cdd41"));
@@ -376,7 +376,7 @@ fn nixos_runtime_installs_patches_and_runs_the_verified_upstream_artifact() {
         &cancellations,
         &mut report,
     )
-    .expect("Dust via Nix install")
+    .expect("Dusty via Nix install")
     .expect("installed executable");
     let runtime =
         nix_lsp_runtime_at(directory.path(), &definition).expect("private compatibility runtime");
@@ -630,10 +630,10 @@ fn isolated_version_probe_does_not_inherit_the_developer_environment() {
         executable: "/bin/sh".into(),
         arguments: vec![
             "-c".into(),
-            "test -z \"${HOME+x}\" && printf '%s' \"$DUST_PROBE_FIXTURE\"".into(),
+            "test -z \"${HOME+x}\" && printf '%s' \"$DUSTY_PROBE_FIXTURE\"".into(),
         ],
         environment: std::collections::BTreeMap::from([(
-            "DUST_PROBE_FIXTURE".into(),
+            "DUSTY_PROBE_FIXTURE".into(),
             "isolated".into(),
         )]),
         current_directory: Some(directory.path().into()),
@@ -863,7 +863,7 @@ fn lsp_protocol_smoke(
     std::fs::create_dir_all(project.join("src")).expect("project directory");
     std::fs::write(
         project.join("Cargo.toml"),
-        "[package]\nname='dust_protocol_smoke'\nversion='0.1.0'\nedition='2024'\n",
+        "[package]\nname='dusty_protocol_smoke'\nversion='0.1.0'\nedition='2024'\n",
     )
     .expect("Cargo marker");
     std::fs::write(project.join("package.json"), "{}\n").expect("Node marker");
@@ -875,7 +875,7 @@ fn lsp_protocol_smoke(
     .expect("Python marker");
     std::fs::write(
         project.join("go.mod"),
-        "module example.com/dust-smoke\ngo 1.24\n",
+        "module example.com/dusty-smoke\ngo 1.24\n",
     )
     .expect("Go marker");
     std::fs::write(project.join(".clangd"), "CompileFlags: {}\n").expect("clangd marker");
@@ -1430,7 +1430,7 @@ fn pinned_nix_uninstall_removes_only_its_profile_generations() {
     assert_eq!(std::fs::read_dir(&profiles).unwrap().count(), 1);
 }
 
-// Dust only offers Nix runtimes on Unix.
+// Dusty only offers Nix runtimes on Unix.
 #[cfg(unix)]
 #[test]
 fn nix_profile_uninstall_reports_metadata_errors_other_than_absence() {
@@ -1447,7 +1447,7 @@ fn nix_profile_uninstall_reports_metadata_errors_other_than_absence() {
     .unwrap();
     let error = uninstall_nix_lsp_profile(&definition, directory.path()).unwrap_err();
     assert!(
-        error.contains("cannot inspect Dust Nix environments"),
+        error.contains("cannot inspect Dusty Nix environments"),
         "{error}"
     );
 }
@@ -2211,7 +2211,7 @@ fn locked_uv_installation_rejects_another_process_and_uninstall() {
         .into_iter()
         .find(|tool| matches!(tool.install, Some(ToolInstall::UvTool { .. })))
         .unwrap();
-    if let Some(root) = std::env::var_os("DUST_TEST_LOCKED_TOOL_ROOT") {
+    if let Some(root) = std::env::var_os("DUSTY_TEST_LOCKED_TOOL_ROOT") {
         let root = std::path::Path::new(&root);
         let (_cancel, cancellations) = mpsc::channel();
         let error = crate::tools::runtimes::install_uv_tool(
@@ -2243,7 +2243,7 @@ fn locked_uv_installation_rejects_another_process_and_uninstall() {
     let lock = crate::files::lock_exclusive(file, false).unwrap();
     let output = std::process::Command::new(std::env::current_exe().unwrap())
         .arg("locked_uv_installation_rejects_another_process_and_uninstall")
-        .env("DUST_TEST_LOCKED_TOOL_ROOT", root.path())
+        .env("DUSTY_TEST_LOCKED_TOOL_ROOT", root.path())
         .output()
         .unwrap();
     assert!(
@@ -2384,7 +2384,7 @@ fn package_failed_commit_preserves_rollback() {
     let current = manager
         .commit_prepared(&manifest, &plugin, &object)
         .unwrap();
-    let backup_path = root.path().join("dust-packages.lock.previous.json");
+    let backup_path = root.path().join("dusty-packages.lock.previous.json");
     let backup = std::fs::read(&backup_path).unwrap();
     let limited = crate::tools::PackageStore::new(
         root.path().into(),
@@ -2435,7 +2435,7 @@ fn package_removal_ignores_its_own_dependencies_but_not_other_packages() {
         .unwrap();
     lock.packages[0].dependencies.push("demo".into());
     crate::tools::write_lock_atomic(
-        &root.path().join("dust-packages.lock.json"),
+        &root.path().join("dusty-packages.lock.json"),
         &lock,
         1024 * 1024,
     )
@@ -2444,7 +2444,7 @@ fn package_removal_ignores_its_own_dependencies_but_not_other_packages() {
     let mut lock = manager.commit_prepared(&other, &plugin, &object).unwrap();
     lock.packages[1].dependencies.push("demo".into());
     crate::tools::write_lock_atomic(
-        &root.path().join("dust-packages.lock.json"),
+        &root.path().join("dusty-packages.lock.json"),
         &lock,
         1024 * 1024,
     )

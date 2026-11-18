@@ -1,7 +1,7 @@
 //! Stale-while-revalidate, merging without moving the reader,
 //! conditional requests and the warm worker (F3).
 #![cfg(unix)]
-use dust::editor::input::KeyCode;
+use dusty::editor::input::KeyCode;
 use std::time::Duration;
 
 #[path = "support/forge_fake.rs"]
@@ -24,7 +24,7 @@ fn prime(ready: &str) {
     settle(&mut screen, Duration::from_millis(400));
 }
 
-fn list_rows(screen: &mut dust::git::screen::GitScreen) -> Vec<String> {
+fn list_rows(screen: &mut dusty::git::screen::GitScreen) -> Vec<String> {
     // Each record's title row with its `#N opened …` row.
     let lines = view(screen)
         .lines()

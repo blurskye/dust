@@ -74,7 +74,7 @@ impl Disk {
             let (sender, replies) = mpsc::channel();
             let cache = cache.clone();
             let spawned = std::thread::Builder::new()
-                .name("dust-forge-disk".into())
+                .name("dusty-forge-disk".into())
                 .spawn(move || {
                     while let Ok((key, asked, cache_key, epoch)) = inbox.recv() {
                         let found = read(&cache, &key, &cache_key);

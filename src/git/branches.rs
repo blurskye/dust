@@ -163,7 +163,7 @@ impl GitBranchWorker {
         let worker = Arc::clone(&cancel);
         let (tx, rx) = mpsc::sync_channel(1);
         thread::Builder::new()
-            .name(format!("dust-git-branch-{}", request_id.0))
+            .name(format!("dusty-git-branch-{}", request_id.0))
             .spawn(move || {
                 let result = run(request_id, &request, &worker);
                 let _ = tx.send(GitBranchEvent::Complete(result));
@@ -801,11 +801,11 @@ fn add_worktree(
         .and_then(|builder| builder.write())
         .and_then(|tree| repository.find_tree(tree))
         .map_err(backend)?;
-    let signature = git2::Signature::now("Dust", "dust@localhost").map_err(backend)?;
+    let signature = git2::Signature::now("Dusty", "dusty@localhost").map_err(backend)?;
     let start = repository
         .commit(None, &signature, &signature, "worktree start", &empty, &[])
         .map_err(backend)?;
-    let temporary = format!("refs/heads/dust-worktree/{name}");
+    let temporary = format!("refs/heads/dusty-worktree/{name}");
     let starting = repository
         .reference(&temporary, start, true, "worktree start")
         .map_err(backend)?;
@@ -1172,7 +1172,7 @@ mod exclude_tests {
         assert!(repository.find_worktree("broken").is_err());
         assert!(
             repository
-                .find_reference("refs/heads/dust-worktree/broken")
+                .find_reference("refs/heads/dusty-worktree/broken")
                 .is_err()
         );
         let head = repository.head().unwrap().target().unwrap();
@@ -1188,7 +1188,7 @@ mod exclude_tests {
         assert!(path.join("tracked.txt").is_file());
         assert!(
             repository
-                .find_reference("refs/heads/dust-worktree/broken")
+                .find_reference("refs/heads/dusty-worktree/broken")
                 .is_err()
         );
     }

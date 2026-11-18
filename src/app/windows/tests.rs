@@ -108,7 +108,7 @@ fn the_confirmation_help_action_is_focusable_advertised_and_leaves_the_question_
 fn the_changes_diff_pane_follows_focus_and_tab_switches_the_comparison() {
     let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
-    let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+    let sig = git2::Signature::now("Dusty", "dusty@example.invalid").unwrap();
     fs::write(app.state.workspace_root.join("f.txt"), "one\ntwo\nthree\n").unwrap();
     {
         let mut index = repo.index().unwrap();
@@ -219,7 +219,7 @@ fn the_changes_diff_pane_follows_focus_and_tab_switches_the_comparison() {
 fn a_small_changes_pane_opens_on_the_change_and_ctrl_d_scrolls_it() {
     let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
-    let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+    let sig = git2::Signature::now("Dusty", "dusty@example.invalid").unwrap();
     let lines = |changed: &str| {
         (1..=90)
             .map(|n| match n {
@@ -323,7 +323,7 @@ fn a_small_changes_pane_opens_on_the_change_and_ctrl_d_scrolls_it() {
 fn staging_from_the_change_surface_acts_on_the_focused_row_not_the_active_buffer() {
     let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
-    let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+    let sig = git2::Signature::now("Dusty", "dusty@example.invalid").unwrap();
     for name in ["a.txt", "b.txt"] {
         fs::write(app.state.workspace_root.join(name), "one\n").unwrap();
         let mut index = repo.index().unwrap();
@@ -424,7 +424,7 @@ fn staging_from_the_change_surface_acts_on_the_focused_row_not_the_active_buffer
 fn staging_an_unsaved_focused_row_offers_the_choice_and_writes_nothing() {
     let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
-    let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+    let sig = git2::Signature::now("Dusty", "dusty@example.invalid").unwrap();
     for name in ["unsaved.txt", "other.txt"] {
         fs::write(app.state.workspace_root.join(name), "disk\n").unwrap();
         let mut index = repo.index().unwrap();
@@ -2305,7 +2305,7 @@ fn session_restore_removes_plugin_windows_before_replacing_their_tabs() {
                     screen_bottom: 0,
                 },
                 explorer_title: "Explorer",
-                dashboard_title: "Dust",
+                dashboard_title: "Dusty",
                 picker_title: "Picker",
                 terminals: &[],
             },
@@ -2406,7 +2406,7 @@ fn failed_explorer_reconstruction_does_not_publish_a_partial_graph_or_resources(
         crate::app::windows::NativeDescriptions {
             signature,
             explorer_title: "Explorer",
-            dashboard_title: "Dust",
+            dashboard_title: "Dusty",
             picker_title: "Picker",
             terminals: &[],
         },
@@ -3013,8 +3013,8 @@ fn window_creation_cost_probe() {
     use crate::editor::TransactionId;
     use crate::editor::text::TextBuffer;
     use crate::windows::WindowGraph;
-    let case = std::env::var("DUST_COST_CASE").unwrap_or_else(|_| "idle".into());
-    let iterations: usize = std::env::var("DUST_COST_ITERATIONS")
+    let case = std::env::var("DUSTY_COST_CASE").unwrap_or_else(|_| "idle".into());
+    let iterations: usize = std::env::var("DUSTY_COST_ITERATIONS")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(100);
@@ -3049,7 +3049,7 @@ fn window_creation_cost_probe() {
         EditorState::test_clone_count(),
         TextBuffer::test_materializations(),
     );
-    eprintln!("DUST_ALLOC_START");
+    eprintln!("DUSTY_ALLOC_START");
     let start = std::time::Instant::now();
     for _ in 0..iterations {
         match case.as_str() {
@@ -3092,7 +3092,7 @@ fn window_creation_cost_probe() {
         }
     }
     let elapsed = start.elapsed().as_nanos();
-    eprintln!("DUST_ALLOC_END");
+    eprintln!("DUSTY_ALLOC_END");
     let text = TextBuffer::test_materializations();
     println!(
         "case={case} iterations={iterations} buffers=32 bytes_per_buffer={} elapsed_ns={elapsed} graph_copies={} editor_copies={} text_decodes={} text_displays={}",
@@ -3142,7 +3142,7 @@ fn startup_document_and_dashboard_publish_together_only_for_the_accepted_proposa
             screen_bottom: 0,
         },
         explorer_title: "Explorer",
-        dashboard_title: "Dust",
+        dashboard_title: "Dusty",
         picker_title: "Picker",
         terminals: &[],
     };

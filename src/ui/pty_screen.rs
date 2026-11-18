@@ -1,5 +1,5 @@
 //! A terminal tab's screen. alacritty_terminal reads the program's output as a real terminal
-//! would; this module hands its grid and scrollback to the panel in Dust's own cell types.
+//! would; this module hands its grid and scrollback to the panel in Dusty's own cell types.
 use std::sync::Arc;
 use std::sync::Mutex;
 

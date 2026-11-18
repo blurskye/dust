@@ -45,7 +45,7 @@ impl NixWorkspaceWorker {
         let (sender, requests) = mpsc::sync_channel(1);
         let (results, receiver) = mpsc::sync_channel(1);
         let thread = thread::Builder::new()
-            .name("dust-nix-lsp-workspace".into())
+            .name("dusty-nix-lsp-workspace".into())
             .spawn(move || {
                 while let Ok(NixWorkspaceRequest::Prepare { request_id }) = requests.recv() {
                     if results

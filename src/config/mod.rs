@@ -285,7 +285,7 @@ pub struct DashboardActionConfig {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct DashboardConfig {
-    /// Lines (block letters, say) drawn in place of the DUST wordmark; empty for the wordmark.
+    /// Lines (block letters, say) drawn in place of the DUSTY wordmark; empty for the wordmark.
     #[serde(default)]
     pub logo: String,
     pub show_identity: bool,
@@ -333,11 +333,11 @@ impl Default for DashboardConfig {
         Self {
             logo: String::new(),
             show_identity: true,
-            identity: "dust".into(),
+            identity: "dusty".into(),
             show_version: true,
             version_format: "v{version}".into(),
             show_path: true,
-            resize_message: "Dust — resize terminal".into(),
+            resize_message: "Dusty — resize terminal".into(),
             content_width: 160,
             minimum_width: 20,
             minimum_height: 7,
@@ -368,7 +368,7 @@ pub struct LoadedConfig {
     pub config: Config,
     pub path: PathBuf,
     pub diagnostic: Option<String>,
-    /// A problem that doesn't stop the file from applying, such as a setting Dust doesn't have.
+    /// A problem that doesn't stop the file from applying, such as a setting Dusty doesn't have.
     pub warning: Option<String>,
     pub keymaps: LoadedKeymaps,
     pub dashboard: DashboardConfig,

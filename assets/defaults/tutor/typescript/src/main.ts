@@ -1,6 +1,6 @@
 import { hello, shout } from "./greet";
 
-const name = "Dust";
+const name = "Dusty";
 const message = hello(name);
 console.log(message);
 const unused = 42;

@@ -1,8 +1,8 @@
 #!/bin/sh
 # Build all six maintained guests and an actual CLI scaffold in the guest flake shell.
-# Usage: nix develop .#guest --command scripts/check-plugin-guests /absolute/path/to/dust
+# Usage: nix develop .#guest --command scripts/check-plugin-guests /absolute/path/to/dusty
 set -eu
-binary=$(realpath "${1:?pass the built host dust binary}")
+binary=$(realpath "${1:?pass the built host dusty binary}")
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 mkdir -p "$root/target"
 scratch=$(mktemp -d "$root/target/plugin-guests.XXXXXX")

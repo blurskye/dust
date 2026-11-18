@@ -1,4 +1,4 @@
-# Dust semantic-role port; palette attribution: README.md and ../../LICENSES/MIT-gruvbox.txt
+# Dusty semantic-role port; palette attribution: README.md and ../../LICENSES/MIT-gruvbox.txt
 name = "gruvbox-dark"
 
 [styles.default]

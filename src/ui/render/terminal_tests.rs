@@ -345,7 +345,7 @@ fn the_debug_console_and_the_terminal_panel_are_planned_together_rather_than_col
     let config = loaded.config.clone();
     let dashboard = crate::config::DashboardConfig::default();
     let (width, height) = (120u16, 40u16);
-    let mut state = EditorState::new(std::path::PathBuf::from("/tmp/dust-workspace"));
+    let mut state = EditorState::new(std::path::PathBuf::from("/tmp/dusty-workspace"));
     state
         .open_text(
             crate::editor::text::TextBuffer::from_text("fn main() {}\n"),

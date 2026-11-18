@@ -1,7 +1,7 @@
-//! Requests to a running Dust from programs it starts. Dust listens on a Unix socket named
-//! in `DUST_SERVER`. `dust --remote FILE` (lazygit's edit key) sends one line per file,
+//! Requests to a running Dusty from programs it starts. Dusty listens on a Unix socket named
+//! in `DUSTY_SERVER`. `dusty --remote FILE` (lazygit's edit key) sends one line per file,
 //! `<line>\t<JSON path bytes>` with line 0 when none was given, and exits after the request
-//! is accepted. `dust --agent-tools`
+//! is accepted. `dusty --agent-tools`
 //! (the MCP server of an agent session) sends `agent\t<json>` to start a subagent and
 //! waits on the same connection for its answer.
 
@@ -64,8 +64,8 @@ use nix::poll::poll;
 use serde_json::Value;
 use serde_json::json;
 
-/// The variable terminals started by Dust find the socket in.
-pub const SERVER_VARIABLE: &str = "DUST_SERVER";
+/// The variable terminals started by Dusty find the socket in.
+pub const SERVER_VARIABLE: &str = "DUSTY_SERVER";
 const REQUEST_BYTE_LIMIT: u64 = 1024 * 1024;
 const AGENT_PREFIX: &str = "agent\t";
 const REQUEST_QUEUE_LIMIT: usize = 64;
@@ -123,7 +123,7 @@ impl Reply {
         }
     }
 
-    /// Written from a worker thread, so a reader that stalls cannot stall Dust.
+    /// Written from a worker thread, so a reader that stalls cannot stall Dusty.
     pub fn send(self, answer: Result<String, String>) {
         // A full queue closes this connection; it must not create another worker.
         let _ = self.sender.try_send((self.stream, answer));
@@ -162,7 +162,7 @@ impl RemoteServer {
     /// Listen in `directory`, which should be private to the user.
     pub fn start(directory: &Path) -> io::Result<Self> {
         fs::create_dir_all(directory)?;
-        let path = directory.join(format!("dust-{}.sock", std::process::id()));
+        let path = directory.join(format!("dusty-{}.sock", std::process::id()));
         let _ = fs::remove_file(&path);
         let listener = UnixListener::bind(&path)?;
         #[cfg(unix)]
@@ -177,7 +177,7 @@ impl RemoteServer {
         let reply_writing = writing.clone();
         let reply_stop = stopping.clone();
         let reply_worker = thread::Builder::new()
-            .name("dust-remote-replies".into())
+            .name("dusty-remote-replies".into())
             .spawn(move || {
                 while !reply_stop.load(Ordering::Acquire) {
                     match pending.recv_timeout(Duration::from_millis(100)) {
@@ -201,7 +201,7 @@ impl RemoteServer {
         let listener_stop = stopping.clone();
         let listener_reading = reading.clone();
         let listener_worker = thread::Builder::new()
-            .name("dust-remote".into())
+            .name("dusty-remote".into())
             .spawn(move || {
                 loop {
                     #[cfg(unix)]
@@ -415,10 +415,10 @@ pub fn ask_agent(mut stream: UnixStream, request: &Value) -> io::Result<Value> {
     let mut answer = String::new();
     BufReader::new(stream).read_line(&mut answer)?;
     serde_json::from_str(&answer)
-        .map_err(|_| io::Error::new(io::ErrorKind::UnexpectedEof, "Dust closed the connection"))
+        .map_err(|_| io::Error::new(io::ErrorKind::UnexpectedEof, "Dusty closed the connection"))
 }
 
-/// Ask the Dust at `server` to open `paths`; `line` applies to the first.
+/// Ask the Dusty at `server` to open `paths`; `line` applies to the first.
 pub fn send(server: &Path, paths: &[PathBuf], line: Option<usize>) -> io::Result<()> {
     let mut message = String::new();
     for (index, path) in paths.iter().enumerate() {
@@ -443,28 +443,28 @@ pub fn send(server: &Path, paths: &[PathBuf], line: Option<usize>) -> io::Result
     stream.read_exact(&mut answer).map_err(|error| {
         io::Error::new(
             error.kind(),
-            format!("Dust did not accept all remote files: {error}"),
+            format!("Dusty did not accept all remote files: {error}"),
         )
     })?;
     if &answer != b"ok\n" {
-        return Err(io::Error::other("Dust did not accept all remote files"));
+        return Err(io::Error::other("Dusty did not accept all remote files"));
     }
     Ok(())
 }
 
-/// Write a lazygit config whose edit keys open files in this Dust, and return the
+/// Write a lazygit config whose edit keys open files in this Dusty, and return the
 /// `LG_CONFIG_FILE` value that layers it over the user's own lazygit config.
-pub fn lazygit_config(directory: &Path, dust: &Path) -> io::Result<String> {
+pub fn lazygit_config(directory: &Path, dusty: &Path) -> io::Result<String> {
     #[cfg(unix)]
     let program =
-        format!("'{}'", dust.display().to_string().replace('\'', "'\\''")).replace('\'', "''");
+        format!("'{}'", dusty.display().to_string().replace('\'', "'\\''")).replace('\'', "''");
     #[cfg(windows)]
-    let program = format!("\"{}\"", dust.display()).replace('\'', "''");
+    let program = format!("\"{}\"", dusty.display()).replace('\'', "''");
     let overlay = directory.join(format!("lazygit-{}.yml", std::process::id()));
     fs::write(
         &overlay,
         format!(
-            "# Written by Dust: lazygit's edit keys open files in the Dust that started it.\n\
+            "# Written by Dusty: lazygit's edit keys open files in the Dusty that started it.\n\
              os:\n  \
              edit: '{program} --remote {{{{filename}}}}'\n  \
              editAtLine: '{program} --remote {{{{filename}}}} --line {{{{line}}}}'\n  \
@@ -714,7 +714,7 @@ mod tests {
     #[test]
     fn oversized_bulk_requests_are_rejected_before_connecting() {
         let paths = vec![crate::files::absolute_test_path(&format!("/{}", "a".repeat(1024))); 1100];
-        let error = send(Path::new("/no-such-dust.sock"), &paths, None).unwrap_err();
+        let error = send(Path::new("/no-such-dusty.sock"), &paths, None).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
     }
 
@@ -723,11 +723,11 @@ mod tests {
     #[test]
     fn lazygit_commands_quote_shell_paths_separately_from_yaml() {
         let directory = tempfile::tempdir().unwrap();
-        let dust = directory
+        let dusty = directory
             .path()
-            .join("dust '\"$HOME`echo expanded`\\binary");
-        crate::testing::write_executable(&dust, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n");
-        lazygit_config(directory.path(), &dust).unwrap();
+            .join("dusty '\"$HOME`echo expanded`\\binary");
+        crate::testing::write_executable(&dusty, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n");
+        lazygit_config(directory.path(), &dusty).unwrap();
         let overlay = directory
             .path()
             .join(format!("lazygit-{}.yml", std::process::id()));
@@ -750,13 +750,13 @@ mod tests {
 
     #[test]
     fn lazygit_overlays_are_per_process() {
-        const CHILD_DIRECTORY: &str = "DUST_TEST_LAZYGIT_DIRECTORY";
+        const CHILD_DIRECTORY: &str = "DUSTY_TEST_LAZYGIT_DIRECTORY";
         if let Some(directory) = std::env::var_os(CHILD_DIRECTORY) {
-            lazygit_config(Path::new(&directory), Path::new("/second/dust")).unwrap();
+            lazygit_config(Path::new(&directory), Path::new("/second/dusty")).unwrap();
             return;
         }
         let directory = tempfile::tempdir().unwrap();
-        lazygit_config(directory.path(), Path::new("/first/dust")).unwrap();
+        lazygit_config(directory.path(), Path::new("/first/dusty")).unwrap();
         let first = directory
             .path()
             .join(format!("lazygit-{}.yml", std::process::id()));
@@ -776,7 +776,7 @@ mod tests {
         assert!(overlays.iter().any(|entry| {
             fs::read_to_string(entry.path())
                 .unwrap()
-                .contains("/second/dust")
+                .contains("/second/dusty")
         }));
     }
 

@@ -55,7 +55,7 @@ pub(super) fn download_checked(
     let cancelled = Arc::new(AtomicBool::new(false));
     let worker_cancelled = cancelled.clone();
     thread::Builder::new()
-        .name("dust-tool-download".into())
+        .name("dusty-tool-download".into())
         .spawn(move || {
             let result = download_artifact(
                 &url,

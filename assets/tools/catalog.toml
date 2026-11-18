@@ -1,7 +1,7 @@
-# Dust-owned Linux tool sources. Direct release artifacts are exact-version, HTTPS-only
+# Dusty-owned Linux tool sources. Direct release artifacts are exact-version, HTTPS-only
 # and SHA-256 pinned. Ecosystem packages are exact-version and installed only in a
-# Dust-owned Bun prefix. The package installer never invokes npm or a system package
-# manager. On NixOS, explicit LSP installation realizes Dust's locked private Nix
+# Dusty-owned Bun prefix. The package installer never invokes npm or a system package
+# manager. On NixOS, explicit LSP installation realizes Dusty's locked private Nix
 # compatibility environment, then verifies and processes this same upstream artifact.
 
 [[tool]]
@@ -481,7 +481,7 @@ languages = ["rust", "c", "cpp"]
 executable = "lldb-dap"
 project_root_markers = ["Cargo.toml", "compile_commands.json", "compile_flags.txt", ".clangd"]
 project_root_strategy = "marker"
-# LLVM does not publish a portable, supported standalone lldb-dap artifact. Dust
+# LLVM does not publish a portable, supported standalone lldb-dap artifact. Dusty
 # deliberately leaves this as discovery-only instead of disguising a distro package
 # installation as a managed download.
 

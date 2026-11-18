@@ -1,6 +1,6 @@
-# Contributing to Dust
+# Contributing to Dusty
 
-Dust is one Rust package. Keep changes focused, reuse the existing feature owner,
+Dusty is one Rust package. Keep changes focused, reuse the existing feature owner,
 and add regression tests beside it. Cross-feature tests belong in `src/app/tests/`;
 CLI and real-terminal tests belong in `tests/`. See [ARCHITECTURE.md](ARCHITECTURE.md).
 Settings, keymaps and labels belong in `assets/defaults/`.
@@ -26,7 +26,7 @@ failing test because a required tool is missing. For CLI and terminal checks:
 cargo run --locked -- --check-config
 cargo run --locked -- --check-api-compatibility api/compat-v1.json
 cargo build --release --locked
-python3 tests/pty_smoke.py --binary target/release/dust
+python3 tests/pty_smoke.py --binary target/release/dusty
 ```
 
 ## Rebuild the test plugin
@@ -36,10 +36,10 @@ WIT changes, start from the repository root in a new shell:
 
 ```sh
 nix develop .#guest
-cp wit/dust-plugin.wit tests/fixtures/retained-guest/wit/dust-plugin.wit
+cp wit/dusty-plugin.wit tests/fixtures/retained-guest/wit/dusty-plugin.wit
 cd tests/fixtures/retained-guest
 cargo build --locked --release --target wasm32-unknown-unknown --target-dir target
-cp target/wasm32-unknown-unknown/release/dust_retained_guest.wasm retained-guest.core.wasm
+cp target/wasm32-unknown-unknown/release/dusty_retained_guest.wasm retained-guest.core.wasm
 ```
 
 Commit the fixture source, matching WIT and rebuilt binary together. Update the
@@ -54,7 +54,7 @@ ImageMagick (`import`) and FiraCode Nerd Font for the screenshot script:
 
 ```sh
 cargo build --release --locked
-scripts/ui-shot scripts/ui-scenarios/tour.keys --binary target/release/dust \
+scripts/ui-shot scripts/ui-scenarios/tour.keys --binary target/release/dusty \
   --size 80x24 120x40 200x60 --out target/ui-shots
 ```
 

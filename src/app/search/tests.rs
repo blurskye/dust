@@ -690,7 +690,7 @@ fn completed_stream_and_idle_snapshot_have_one_accepted_lifetime() {
 #[test]
 #[ignore = "explicit search/preview ownership cost probe"]
 fn search_owner_cost_probe() {
-    let count = std::env::var("DUST_COST_ITERATIONS")
+    let count = std::env::var("DUSTY_COST_ITERATIONS")
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
         .unwrap_or(1000)
@@ -699,7 +699,7 @@ fn search_owner_cost_probe() {
     item.snapshot = Arc::from("0123456789abcdef\n".repeat(8000).into_bytes());
     item.line = 4096;
     item.range = 69632..69638;
-    let mode = std::env::var("DUST_COST_CASE").unwrap_or("unchanged_snapshot".into());
+    let mode = std::env::var("DUSTY_COST_CASE").unwrap_or("unchanged_snapshot".into());
     let max = 65536;
     let mut owner = Search {
         matches: vec![item],
@@ -711,7 +711,7 @@ fn search_owner_cost_probe() {
         crate::editor::EditorState::test_clone_count(),
         crate::editor::text::TextBuffer::test_materializations(),
     );
-    eprintln!("DUST_ALLOC_START");
+    eprintln!("DUSTY_ALLOC_START");
     let start = Instant::now();
     for n in 0..count {
         if mode == "changed_snapshot" {
@@ -720,7 +720,7 @@ fn search_owner_cost_probe() {
         std::hint::black_box(owner.preview_match("one", max));
     }
     let elapsed = start.elapsed();
-    eprintln!("DUST_ALLOC_END");
+    eprintln!("DUSTY_ALLOC_END");
     let after = crate::editor::text::TextBuffer::test_materializations();
     println!(
         "case={mode} iterations={count} elapsed_ns={} graph_copies={} editor_copies={} text_decodes={} text_displays={}",

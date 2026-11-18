@@ -36,7 +36,7 @@ use crate::config::settings::ThemeConfig;
 use crate::config::themes::ThemeRead;
 
 pub fn user_state_directory() -> PathBuf {
-    if let Some(root) = env::var_os("DUST_STATE_HOME") {
+    if let Some(root) = env::var_os("DUSTY_STATE_HOME") {
         return PathBuf::from(root);
     }
     #[cfg(target_os = "windows")]
@@ -44,17 +44,17 @@ pub fn user_state_directory() -> PathBuf {
         env::var_os("LOCALAPPDATA")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("."))
-            .join("Dust")
+            .join("Dusty")
     }
     #[cfg(target_os = "macos")]
     {
         env::var_os("XDG_STATE_HOME")
-            .map(|root| PathBuf::from(root).join("dust"))
+            .map(|root| PathBuf::from(root).join("dusty"))
             .or_else(|| {
                 env::var_os("HOME")
-                    .map(|home| PathBuf::from(home).join("Library/Application Support/Dust"))
+                    .map(|home| PathBuf::from(home).join("Library/Application Support/Dusty"))
             })
-            .unwrap_or_else(|| PathBuf::from("dust"))
+            .unwrap_or_else(|| PathBuf::from("dusty"))
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
@@ -62,13 +62,13 @@ pub fn user_state_directory() -> PathBuf {
             .map(PathBuf::from)
             .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state")))
             .unwrap_or_else(|| PathBuf::from("."))
-            .join("dust")
+            .join("dusty")
     }
 }
 
 #[must_use]
 pub fn user_config_path() -> PathBuf {
-    if let Some(root) = env::var_os("DUST_CONFIG_HOME") {
+    if let Some(root) = env::var_os("DUSTY_CONFIG_HOME") {
         return PathBuf::from(root).join("config.toml");
     }
     #[cfg(target_os = "windows")]
@@ -76,18 +76,18 @@ pub fn user_config_path() -> PathBuf {
         env::var_os("APPDATA")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("."))
-            .join("Dust")
+            .join("Dusty")
             .join("config.toml")
     }
     #[cfg(target_os = "macos")]
     {
         env::var_os("XDG_CONFIG_HOME")
-            .map(|root| PathBuf::from(root).join("dust"))
+            .map(|root| PathBuf::from(root).join("dusty"))
             .or_else(|| {
                 env::var_os("HOME")
-                    .map(|home| PathBuf::from(home).join("Library/Application Support/Dust"))
+                    .map(|home| PathBuf::from(home).join("Library/Application Support/Dusty"))
             })
-            .unwrap_or_else(|| PathBuf::from("dust"))
+            .unwrap_or_else(|| PathBuf::from("dusty"))
             .join("config.toml")
     }
     #[cfg(all(unix, not(target_os = "macos")))]
@@ -96,7 +96,7 @@ pub fn user_config_path() -> PathBuf {
             .map(PathBuf::from)
             .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
             .unwrap_or_else(|| PathBuf::from("."))
-            .join("dust/config.toml")
+            .join("dusty/config.toml")
     }
 }
 
@@ -131,7 +131,7 @@ pub(super) const BUNDLED_DASHBOARD: &str = include_str!(concat!(
 ));
 pub(super) const BUNDLED_THEME: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/assets/themes/dust.toml"
+    "/assets/themes/dusty.toml"
 ));
 
 /// The bundled defaults, parsed once. Startup and every reload need them several times, and
@@ -211,7 +211,7 @@ fn parse_bundled_config() -> LoadedConfig {
         dashboard_path: PathBuf::from("<bundled:dashboard>"),
         dashboard_spans: BTreeMap::new(),
         theme,
-        theme_path: PathBuf::from("<bundled:theme:dust>"),
+        theme_path: PathBuf::from("<bundled:theme:dusty>"),
         theme_spans: BTreeMap::new(),
     }
 }
@@ -378,7 +378,7 @@ pub(super) fn capture_configuration_bundle(theme_hint: &str) -> ConfigurationSou
 
 #[must_use]
 pub fn load_user_config() -> LoadedConfig {
-    match capture_consistent_configuration_bundle("dust") {
+    match capture_consistent_configuration_bundle("dusty") {
         Ok((bundle, fingerprint)) => {
             let mut loaded = bundle.into_loaded();
             loaded.source_fingerprint = Some(fingerprint);
@@ -628,7 +628,7 @@ pub(super) fn fallback_config(diagnostic: Option<String>) -> LoadedConfig {
         dashboard_path: PathBuf::from("<bundled:dashboard>"),
         dashboard_spans: BTreeMap::new(),
         theme: bundled_theme(),
-        theme_path: PathBuf::from("<bundled:theme:dust>"),
+        theme_path: PathBuf::from("<bundled:theme:dusty>"),
         theme_spans: BTreeMap::new(),
     }
 }
@@ -666,7 +666,7 @@ pub(super) fn parse_config_source(path: &Path, source: &str) -> LoadedConfig {
                     |name| name.to_string_lossy().into_owned(),
                 );
                 format!(
-                    "left out settings Dust doesn't have from {file}: {}",
+                    "left out settings Dusty doesn't have from {file}: {}",
                     ignored.join(", ")
                 )
             }),
@@ -675,7 +675,7 @@ pub(super) fn parse_config_source(path: &Path, source: &str) -> LoadedConfig {
             dashboard_path: PathBuf::from("<bundled:dashboard>"),
             dashboard_spans: BTreeMap::new(),
             theme: bundled_theme(),
-            theme_path: PathBuf::from("<bundled:theme:dust>"),
+            theme_path: PathBuf::from("<bundled:theme:dusty>"),
             theme_spans: BTreeMap::new(),
         },
         // What happens next is the caller's to say: startup uses the bundled settings, a reload
@@ -685,7 +685,7 @@ pub(super) fn parse_config_source(path: &Path, source: &str) -> LoadedConfig {
 }
 
 /// The settings a user config.toml gives over the bundled defaults, with the keys it sets, its
-/// source after migration and the keys it has that Dust doesn't, which are left out so an old
+/// source after migration and the keys it has that Dusty doesn't, which are left out so an old
 /// or misspelt setting doesn't cost the rest of the file; an error when it does not parse or
 /// holds an invalid value.
 pub(super) fn settings_from_source(
@@ -889,7 +889,7 @@ impl ConfigurationWorker {
         let (sender, requests) = mpsc::sync_channel(4);
         let (results, receiver) = mpsc::channel();
         let thread = thread::Builder::new()
-            .name("dust-configuration".into())
+            .name("dusty-configuration".into())
             .spawn(move || {
                 let mut reload_id = 0_u64;
                 // Without a loaded snapshot, verify startup with a reload. Otherwise

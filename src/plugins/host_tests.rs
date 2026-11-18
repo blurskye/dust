@@ -200,14 +200,14 @@ fn completed_component_execution_cancels_its_epoch_timer() {
 
 #[test]
 fn component_host_queues_declared_ui_requests_without_graph_authority() {
-    use component_api::dust::plugin::host::Host;
-    use component_api::dust::plugin::host::OpenWindowRequest;
-    use component_api::dust::plugin::host::UiNode;
-    use component_api::dust::plugin::host::UiNodeKind;
-    use component_api::dust::plugin::host::UiRequest;
-    use component_api::dust::plugin::host::UiStyle;
-    use component_api::dust::plugin::host::UiTree;
-    use component_api::dust::plugin::host::WindowPlacement;
+    use component_api::dusty::plugin::host::Host;
+    use component_api::dusty::plugin::host::OpenWindowRequest;
+    use component_api::dusty::plugin::host::UiNode;
+    use component_api::dusty::plugin::host::UiNodeKind;
+    use component_api::dusty::plugin::host::UiRequest;
+    use component_api::dusty::plugin::host::UiStyle;
+    use component_api::dusty::plugin::host::UiTree;
+    use component_api::dusty::plugin::host::WindowPlacement;
     let mut host = component_host();
     host.declared_content_types
         .insert("plugin.demo.chat-panel".into());
@@ -285,10 +285,10 @@ fn component_host_queues_declared_ui_requests_without_graph_authority() {
 
 #[test]
 fn component_confirmation_request_is_typed_bounded_and_single_per_execution() {
-    use component_api::dust::plugin::host::ConfirmationAnswer;
-    use component_api::dust::plugin::host::ConfirmationErrorCode;
-    use component_api::dust::plugin::host::ConfirmationRequest;
-    use component_api::dust::plugin::host::Host;
+    use component_api::dusty::plugin::host::ConfirmationAnswer;
+    use component_api::dusty::plugin::host::ConfirmationErrorCode;
+    use component_api::dusty::plugin::host::ConfirmationRequest;
+    use component_api::dusty::plugin::host::Host;
     let mut host = component_host();
     let request = || ConfirmationRequest {
         title: "Continue?".into(),
@@ -362,8 +362,8 @@ fn component_confirmation_request_is_typed_bounded_and_single_per_execution() {
 
 #[test]
 fn component_storage_queue_is_capability_key_and_count_bounded() {
-    use component_api::dust::plugin::host::Host;
-    use component_api::dust::plugin::host::StorageRequest;
+    use component_api::dusty::plugin::host::Host;
+    use component_api::dusty::plugin::host::StorageRequest;
     let policy = PluginStorageContribution {
         maximum_items: 32,
         maximum_value_bytes: 1_024,
@@ -376,7 +376,7 @@ fn component_storage_queue_is_capability_key_and_count_bounded() {
         host.queue_storage_request(StorageRequest::Get("valid".into()))
             .unwrap_err()
             .code,
-        component_api::dust::plugin::host::StorageErrorCode::Unavailable
+        component_api::dusty::plugin::host::StorageErrorCode::Unavailable
     );
     assert!(host.storage_requests.is_empty());
     assert!(host.pending_storage.is_empty());
@@ -393,11 +393,11 @@ fn component_storage_queue_is_capability_key_and_count_bounded() {
         host.queue_storage_request(StorageRequest::Get("bad/key".into()))
             .unwrap_err()
             .code,
-        component_api::dust::plugin::host::StorageErrorCode::InvalidKey
+        component_api::dusty::plugin::host::StorageErrorCode::InvalidKey
     );
     for _ in 1..STORAGE_REQUEST_LIMIT {
         host.queue_storage_request(StorageRequest::Delete(
-            component_api::dust::plugin::host::StorageDeleteRequest {
+            component_api::dusty::plugin::host::StorageDeleteRequest {
                 key: "valid".into(),
                 expected_revision: 1,
             },
@@ -408,11 +408,11 @@ fn component_storage_queue_is_capability_key_and_count_bounded() {
         host.queue_storage_request(StorageRequest::Get("valid".into()))
             .unwrap_err()
             .code,
-        component_api::dust::plugin::host::StorageErrorCode::QueueFull
+        component_api::dusty::plugin::host::StorageErrorCode::QueueFull
     );
     assert_eq!(host.storage_requests.len(), STORAGE_REQUEST_LIMIT);
-    use component_api::dust::plugin::host::VirtualDocumentProposal;
-    use component_api::dust::plugin::host::VirtualDocumentProposalKind;
+    use component_api::dusty::plugin::host::VirtualDocumentProposal;
+    use component_api::dusty::plugin::host::VirtualDocumentProposalKind;
     assert_eq!(
         host.queue_virtual_document_proposal(VirtualDocumentProposal {
             request: 9,
@@ -422,25 +422,25 @@ fn component_storage_queue_is_capability_key_and_count_bounded() {
         })
         .unwrap_err()
         .code,
-        component_api::dust::plugin::host::VirtualDocumentErrorCode::UnknownRequest
+        component_api::dusty::plugin::host::VirtualDocumentErrorCode::UnknownRequest
     );
     assert!(host.virtual_document_proposals.is_empty());
 }
 
 #[test]
 fn component_output_queues_enforce_cumulative_byte_budgets() {
-    use component_api::dust::plugin::host::Host;
-    use component_api::dust::plugin::host::PickerProviderChunk;
-    use component_api::dust::plugin::host::PickerProviderItem;
-    use component_api::dust::plugin::host::ProviderErrorCode;
-    use component_api::dust::plugin::host::ProviderTerminal;
-    use component_api::dust::plugin::host::ProviderTerminalKind;
-    use component_api::dust::plugin::host::VirtualDocumentErrorCode;
-    use component_api::dust::plugin::host::VirtualDocumentFull;
-    use component_api::dust::plugin::host::VirtualDocumentPatch;
-    use component_api::dust::plugin::host::VirtualDocumentPatchSet;
-    use component_api::dust::plugin::host::VirtualDocumentProposal;
-    use component_api::dust::plugin::host::VirtualDocumentProposalKind;
+    use component_api::dusty::plugin::host::Host;
+    use component_api::dusty::plugin::host::PickerProviderChunk;
+    use component_api::dusty::plugin::host::PickerProviderItem;
+    use component_api::dusty::plugin::host::ProviderErrorCode;
+    use component_api::dusty::plugin::host::ProviderTerminal;
+    use component_api::dusty::plugin::host::ProviderTerminalKind;
+    use component_api::dusty::plugin::host::VirtualDocumentErrorCode;
+    use component_api::dusty::plugin::host::VirtualDocumentFull;
+    use component_api::dusty::plugin::host::VirtualDocumentPatch;
+    use component_api::dusty::plugin::host::VirtualDocumentPatchSet;
+    use component_api::dusty::plugin::host::VirtualDocumentProposal;
+    use component_api::dusty::plugin::host::VirtualDocumentProposalKind;
     let mut host = ComponentHostState {
         editor_requests: Default::default(),
         runtime_epoch: 0,
@@ -1413,7 +1413,7 @@ impl CapturedExecution {
     }
     pub(crate) fn call(
         &self,
-    ) -> &crate::plugins::component::component_api::dust::plugin::host::CommandCall {
+    ) -> &crate::plugins::component::component_api::dusty::plugin::host::CommandCall {
         &self.request.call
     }
     pub(crate) fn virtual_documents(&self) -> &[crate::plugins::PluginVirtualDocumentRequest] {
@@ -2100,8 +2100,8 @@ fn component_storage_driver_validates_each_reply_before_advancing() {
 
 #[test]
 fn component_storage_inbox_retains_unread_results_and_reserves_capacity() {
-    use component_api::dust::plugin::host::Host;
-    use component_api::dust::plugin::host::StorageRequest;
+    use component_api::dusty::plugin::host::Host;
+    use component_api::dusty::plugin::host::StorageRequest;
     let limits = PluginLimits {
         epoch_deadline_ticks: 1000,
         ..Default::default()
@@ -2154,11 +2154,11 @@ fn component_storage_inbox_retains_unread_results_and_reserves_capacity() {
 
 #[test]
 fn component_ui_queue_reserves_result_slots_until_guest_drain() {
-    use component_api::dust::plugin::host::Host;
-    use component_api::dust::plugin::host::OpenWindowRequest;
-    use component_api::dust::plugin::host::UiEvent;
-    use component_api::dust::plugin::host::UiRequest;
-    use component_api::dust::plugin::host::WindowPlacement;
+    use component_api::dusty::plugin::host::Host;
+    use component_api::dusty::plugin::host::OpenWindowRequest;
+    use component_api::dusty::plugin::host::UiEvent;
+    use component_api::dusty::plugin::host::UiRequest;
+    use component_api::dusty::plugin::host::WindowPlacement;
     let limits = PluginLimits {
         epoch_deadline_ticks: 1000,
         ..Default::default()

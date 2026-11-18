@@ -370,7 +370,7 @@ pub(super) fn handle_server_message(context: ServerMessageContext<'_>, message: 
                 let _ = write_content_length_message(
                     stdin,
                     &json!({
-                        "jsonrpc":"2.0","id":id,"error":{"code":-32601,"message":"method not implemented by Dust"}
+                        "jsonrpc":"2.0","id":id,"error":{"code":-32601,"message":"method not implemented by Dusty"}
                     }),
                 );
                 return;

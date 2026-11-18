@@ -44,19 +44,19 @@ jobs:
         run: cargo build --release --locked --target x86_64-unknown-linux-musl --features static
       - name: Check both binaries run and link nothing
         run: |
-          for binary in target/x86_64-unknown-linux-musl/release/{dust,dusty-git}; do
+          for binary in target/x86_64-unknown-linux-musl/release/{dusty,dusty-git}; do
             if ldd "$binary" 2>/dev/null | grep -q '=>'; then ldd "$binary"; exit 1; fi
             "$binary" --version
           done
-      - run: packaging/build-packages.sh ${{ steps.version.outputs.version }} target/x86_64-unknown-linux-musl/release/dust
+      - run: packaging/build-packages.sh ${{ steps.version.outputs.version }} target/x86_64-unknown-linux-musl/release/dusty
       - uses: actions/upload-artifact@v4
         with: { name: dist-packages, path: dist/*, if-no-files-found: error }
       - uses: actions/upload-artifact@v4
         with:
           name: stage
           path: |
-            target/package-stage/dust/dust
-            target/package-stage/dust/dusty-git
+            target/package-stage/dusty/dusty
+            target/package-stage/dusty/dusty-git
           if-no-files-found: error
 
   flatpak:
@@ -68,8 +68,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
-        with: { name: stage, path: target/package-stage/dust }
-      - run: chmod +x target/package-stage/dust/dust target/package-stage/dust/dusty-git
+        with: { name: stage, path: target/package-stage/dusty }
+      - run: chmod +x target/package-stage/dusty/dusty target/package-stage/dusty/dusty-git
       # The image already has the 26.08 Platform and Sdk. Building against them, without
       # --install-deps-from, skips updating the Sdk from Flathub, which fails inside this
       # container's overlay filesystem ("Invalid cross-device link") whenever Flathub has
@@ -79,9 +79,9 @@ jobs:
         run: |
           flatpak info org.freedesktop.Sdk//26.08
           flatpak-builder --repo=repo --disable-rofiles-fuse --force-clean \
-            --default-branch=master build packaging/flatpak/dev.blurskye.Dust.yml
-          flatpak build-bundle repo "dust-$VERSION-x86_64.flatpak" \
-            --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo dev.blurskye.Dust master
+            --default-branch=master build packaging/flatpak/dev.dustyhq.Dusty.yml
+          flatpak build-bundle repo "dusty-$VERSION-x86_64.flatpak" \
+            --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo dev.dustyhq.Dusty master
       - uses: actions/upload-artifact@v4
         with: { name: dist-flatpak, path: '*.flatpak', if-no-files-found: error }
 
@@ -120,15 +120,15 @@ jobs:
           cp LICENSE NOTICE stage/
           cp -R LICENSES stage/
           exe=; [[ $RUNNER_OS == Windows ]] && exe=.exe
-          for name in dust dusty-git; do
+          for name in dusty dusty-git; do
             binary="target/$TARGET/release/$name$exe"
             "$binary" --version
             cp "$binary" stage/
           done
           if [[ $RUNNER_OS == Windows ]]; then
-            (cd stage && 7z a -tzip "../dist/dust-$VERSION-$ARCHIVE.zip" .)
+            (cd stage && 7z a -tzip "../dist/dusty-$VERSION-$ARCHIVE.zip" .)
           else
-            tar -czf "dist/dust-$VERSION-$ARCHIVE.tar.gz" -C stage .
+            tar -czf "dist/dusty-$VERSION-$ARCHIVE.tar.gz" -C stage .
           fi
       - uses: actions/upload-artifact@v4
         with:
@@ -156,4 +156,4 @@ jobs:
         env: { GH_TOKEN: '${{ github.token }}' }
         run: |
           gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" \
-            --title "Dust ${{ needs.packages.outputs.version }}" --generate-notes
+            --title "Dusty ${{ needs.packages.outputs.version }}" --generate-notes

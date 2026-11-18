@@ -1,17 +1,17 @@
 [package]
-name = "dust"
-version = "0.3.1"
+name = "dusty"
+version = "0.4.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
 description = "A terminal IDE with Vim keys, language servers, debugging, git and coding agents"
 repository = "https://github.com/dustyhq/dusty"
 homepage = "https://github.com/dustyhq/dusty"
 rust-version = "1.89"
-default-run = "dust"
+default-run = "dusty"
 
 [dependencies]
-# The terminal emulator behind Alacritty and Zed, so programs in Dust's terminals behave as in a
-# real one; Dust keeps its own PTY processes and only feeds it their output.
+# The terminal emulator behind Alacritty and Zed, so programs in Dusty's terminals behave as in a
+# real one; Dusty keeps its own PTY processes and only feeds it their output.
 alacritty_terminal = { version = "0.26.0", default-features = false }
 clap = { version = "4.5.28", features = ["derive"] }
 # Keep unread SIGWINCH readiness pending when input and resize arrive together.

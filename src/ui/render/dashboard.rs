@@ -1,4 +1,4 @@
-//! The start screen: the DUST wordmark beside the workspace's name, branch, path and last
+//! The start screen: the DUSTY wordmark beside the workspace's name, branch, path and last
 //! commit, then four boxes for recent files, changed files, projects and the configured
 //! actions. Smaller windows drop the wordmark first, then show only recent files and actions.
 
@@ -394,7 +394,7 @@ impl Screen<'_> {
         self.put(x, y, &age, Style::Muted, right);
     }
 
-    /// One row for a window too small for the boxes side by side: `dust v0.2.1 · tally · main`.
+    /// One row for a window too small for the boxes side by side: `dusty v0.2.1 · tally · main`.
     fn draw_header_line(&mut self, x: u16, right: u16) {
         let start = x;
         let mut x = x;
@@ -788,7 +788,7 @@ fn tone(style: Style, selected: bool) -> Style {
     }
 }
 
-/// DUST in half blocks: each letter twice as wide as its grid, two columns apart.
+/// DUSTY in half blocks: each letter twice as wide as its grid, two columns apart.
 fn wordmark() -> Vec<String> {
     let rows: Vec<String> = (0..8)
         .map(|row| {

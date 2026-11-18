@@ -64,7 +64,7 @@ use crate::plugins::virtual_documents::VIRTUAL_DOCUMENT_TITLE_BYTE_LIMIT;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
-fn key_layer_bytes(layer: &component_api::dust::plugin::host::KeyLayer) -> Result<usize, String> {
+fn key_layer_bytes(layer: &component_api::dusty::plugin::host::KeyLayer) -> Result<usize, String> {
     if layer.bindings.len() > 256 {
         return Err("key binding limit exceeded".into());
     }
@@ -151,40 +151,40 @@ pub struct ComponentHostState {
     pub limits: ComponentLimits,
     pub capabilities: BTreeSet<PluginCapability>,
     pub declared_content_types: BTreeSet<String>,
-    pub snapshot: Option<component_api::dust::plugin::host::Snapshot>,
-    pub proposals: Vec<(u64, u64, Vec<component_api::dust::plugin::host::Edit>)>,
+    pub snapshot: Option<component_api::dusty::plugin::host::Snapshot>,
+    pub proposals: Vec<(u64, u64, Vec<component_api::dusty::plugin::host::Edit>)>,
     pub messages: Vec<String>,
     pub config: BTreeMap<String, String>,
     pub ui_revision: Option<u64>,
     pub confirmation_available: bool,
     pub confirmation_result_only: bool,
     pub ui_requests: Vec<PluginUiRequest>,
-    pub ui_events: Vec<component_api::dust::plugin::host::UiEvent>,
+    pub ui_events: Vec<component_api::dusty::plugin::host::UiEvent>,
     pub next_ui_token: u64,
     pub pending_ui_tokens: BTreeSet<u64>,
     pub confirmation_requests: Vec<PluginConfirmationRequest>,
-    pub confirmation_results: Vec<component_api::dust::plugin::host::ConfirmationResult>,
+    pub confirmation_results: Vec<component_api::dusty::plugin::host::ConfirmationResult>,
     pub next_confirmation_token: u64,
-    pub host_events: Vec<component_api::dust::plugin::host::HostEvent>,
+    pub host_events: Vec<component_api::dusty::plugin::host::HostEvent>,
     pub delivered_host_event_ids: BTreeSet<u64>,
     pub host_event_acknowledgements: Vec<u64>,
     pub execution_available: bool,
     pub pending_storage: BTreeMap<u64, usize>,
     pub storage_policy: Option<PluginStorageContribution>,
     pub storage_requests: Vec<PluginStorageRequest>,
-    pub storage_results: Vec<component_api::dust::plugin::host::StorageResult>,
+    pub storage_results: Vec<component_api::dusty::plugin::host::StorageResult>,
     pub next_storage_token: u64,
-    pub provider_requests: Vec<component_api::dust::plugin::host::PickerProviderRequest>,
+    pub provider_requests: Vec<component_api::dusty::plugin::host::PickerProviderRequest>,
     pub delivered_provider_requests: BTreeSet<u64>,
     pub provider_chunks: Vec<PluginPickerChunk>,
-    pub virtual_document_requests: Vec<component_api::dust::plugin::host::VirtualDocumentRequest>,
+    pub virtual_document_requests: Vec<component_api::dusty::plugin::host::VirtualDocumentRequest>,
     pub delivered_virtual_document_requests: BTreeSet<u64>,
     pub virtual_document_proposals: Vec<PluginVirtualDocumentProposal>,
 }
-impl component_api::dust::plugin::host::Host for ComponentHostState {
+impl component_api::dusty::plugin::host::Host for ComponentHostState {
     fn start_process(
         &mut self,
-        request: component_api::dust::plugin::host::ProcessStart,
+        request: component_api::dusty::plugin::host::ProcessStart,
     ) -> Result<u64, String> {
         self.require_editor_capability(PluginCapability::Process)?;
         let bytes = request.program.len()
@@ -205,7 +205,7 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
 
     fn write_process_stdin(
         &mut self,
-        input: component_api::dust::plugin::host::ProcessInput,
+        input: component_api::dusty::plugin::host::ProcessInput,
     ) -> Result<u64, String> {
         self.require_editor_capability(PluginCapability::Process)?;
         let bytes = input.bytes.len();
@@ -219,11 +219,11 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
 
     fn request_file(
         &mut self,
-        operation: component_api::dust::plugin::host::FileOperation,
+        operation: component_api::dusty::plugin::host::FileOperation,
         handler: String,
     ) -> Result<u64, String> {
         self.require_editor_capability(PluginCapability::Files)?;
-        use component_api::dust::plugin::host::FileOperation as Op;
+        use component_api::dusty::plugin::host::FileOperation as Op;
         let bytes = handler.len()
             + match &operation {
                 Op::Read(path)
@@ -242,7 +242,7 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
 
     fn query_syntax(
         &mut self,
-        query: component_api::dust::plugin::host::SyntaxQuery,
+        query: component_api::dusty::plugin::host::SyntaxQuery,
         handler: String,
     ) -> Result<u64, String> {
         self.require_editor_capability(PluginCapability::ReadCurrentBuffer)?;
@@ -267,13 +267,13 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
         )
     }
 
-    fn take_system_events(&mut self) -> Vec<component_api::dust::plugin::host::SystemEvent> {
+    fn take_system_events(&mut self) -> Vec<component_api::dusty::plugin::host::SystemEvent> {
         std::mem::take(&mut self.editor_requests.delivery.system)
     }
 
     fn ui_input(
         &mut self,
-        request: component_api::dust::plugin::host::InputRequest,
+        request: component_api::dusty::plugin::host::InputRequest,
         handler: String,
     ) -> Result<u64, String> {
         let token = self.editor_requests.token()?;
@@ -285,7 +285,7 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
 
     fn ui_select(
         &mut self,
-        request: component_api::dust::plugin::host::SelectRequest,
+        request: component_api::dusty::plugin::host::SelectRequest,
         handler: String,
     ) -> Result<u64, String> {
         let token = self.editor_requests.token()?;
@@ -297,14 +297,14 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
 
     fn notify(
         &mut self,
-        request: component_api::dust::plugin::host::NotifyRequest,
+        request: component_api::dusty::plugin::host::NotifyRequest,
     ) -> Result<(), String> {
         self.queue_surface(crate::plugins::surface::SurfaceRequest::Notify(request))
     }
 
     fn set_presenter(
         &mut self,
-        kind: component_api::dust::plugin::host::PresenterKind,
+        kind: component_api::dusty::plugin::host::PresenterKind,
         handler: Option<String>,
     ) -> Result<(), String> {
         self.queue_surface(crate::plugins::surface::SurfaceRequest::Presenter(
@@ -326,7 +326,7 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
 
     fn open_editable_document(
         &mut self,
-        document: component_api::dust::plugin::host::EditableDocument,
+        document: component_api::dusty::plugin::host::EditableDocument,
         handler: String,
     ) -> Result<u64, String> {
         let token = self.editor_requests.token()?;
@@ -339,7 +339,7 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
     fn register_formatter(
         &mut self,
         filetype: String,
-        step: component_api::dust::plugin::host::Formatter,
+        step: component_api::dusty::plugin::host::Formatter,
     ) -> Result<(), String> {
         self.queue_surface(crate::plugins::surface::SurfaceRequest::Formatter(
             filetype, step, false,
@@ -349,7 +349,7 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
     fn register_before_save(
         &mut self,
         filetype: String,
-        step: component_api::dust::plugin::host::Formatter,
+        step: component_api::dusty::plugin::host::Formatter,
     ) -> Result<(), String> {
         self.queue_surface(crate::plugins::surface::SurfaceRequest::Formatter(
             filetype, step, true,
@@ -358,14 +358,14 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
 
     fn set_chrome_segment(
         &mut self,
-        segment: component_api::dust::plugin::host::ChromeSegment,
+        segment: component_api::dusty::plugin::host::ChromeSegment,
     ) -> Result<(), String> {
         self.queue_surface(crate::plugins::surface::SurfaceRequest::Segment(segment))
     }
 
     fn remove_chrome_segment(
         &mut self,
-        location: component_api::dust::plugin::host::SegmentLocation,
+        location: component_api::dusty::plugin::host::SegmentLocation,
         name: String,
     ) -> Result<(), String> {
         self.queue_surface(crate::plugins::surface::SurfaceRequest::RemoveSegment(
@@ -375,7 +375,7 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
 
     fn register_command(
         &mut self,
-        definition: component_api::dust::plugin::host::CommandDefinition,
+        definition: component_api::dusty::plugin::host::CommandDefinition,
     ) -> Result<(), String> {
         self.require_editor_capability(PluginCapability::Commands)?;
         if definition.arguments.len() > 32 || definition.access.len() > 5 {
@@ -397,7 +397,7 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
 
     fn run_command(
         &mut self,
-        call: component_api::dust::plugin::host::CommandCall,
+        call: component_api::dusty::plugin::host::CommandCall,
     ) -> Result<u64, String> {
         self.require_editor_capability(PluginCapability::Commands)?;
         let bytes = crate::plugins::requests::value_bytes(&call.arguments)?;
@@ -430,7 +430,7 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
 
     fn set_command_result(
         &mut self,
-        value: component_api::dust::plugin::host::CommandValue,
+        value: component_api::dusty::plugin::host::CommandValue,
     ) -> Result<(), String> {
         if self.confirmation_result_only
             || !self.execution_available
@@ -443,13 +443,13 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
         Ok(())
     }
 
-    fn take_command_replies(&mut self) -> Vec<component_api::dust::plugin::host::CommandReply> {
+    fn take_command_replies(&mut self) -> Vec<component_api::dusty::plugin::host::CommandReply> {
         std::mem::take(&mut self.editor_requests.delivery.replies)
     }
 
     fn wrap_command(
         &mut self,
-        wrapper: component_api::dust::plugin::host::CommandWrapper,
+        wrapper: component_api::dusty::plugin::host::CommandWrapper,
     ) -> Result<(), String> {
         self.require_editor_capability(PluginCapability::Commands)?;
         let bytes = wrapper.command.len() + wrapper.handler.len();
@@ -461,7 +461,7 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
 
     fn enter_mode(
         &mut self,
-        mode: component_api::dust::plugin::host::NamedMode,
+        mode: component_api::dusty::plugin::host::NamedMode,
     ) -> Result<(), String> {
         self.require_editor_capability(PluginCapability::Input)?;
         let bytes = mode.label.len() + mode.name.len() + key_layer_bytes(&mode.layer)?;
@@ -479,7 +479,7 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
 
     fn push_key_layer(
         &mut self,
-        layer: component_api::dust::plugin::host::KeyLayer,
+        layer: component_api::dusty::plugin::host::KeyLayer,
     ) -> Result<(), String> {
         self.require_editor_capability(PluginCapability::Input)?;
         let bytes = key_layer_bytes(&layer)?;
@@ -500,7 +500,7 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
 
     fn replace_marks(
         &mut self,
-        marks: component_api::dust::plugin::host::MarkSet,
+        marks: component_api::dusty::plugin::host::MarkSet,
     ) -> Result<(), String> {
         self.require_editor_capability(PluginCapability::Decorations)?;
         if marks.marks.len() > 4096 {
@@ -530,7 +530,7 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
 
     fn publish_diagnostics(
         &mut self,
-        set: component_api::dust::plugin::host::DiagnosticSet,
+        set: component_api::dusty::plugin::host::DiagnosticSet,
     ) -> Result<(), String> {
         self.require_editor_capability(PluginCapability::ShowMessage)?;
         if set.diagnostics.len() > 2000 {
@@ -552,7 +552,7 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
         &mut self,
         buffer: u64,
         namespace: String,
-    ) -> Result<Vec<component_api::dust::plugin::host::Mark>, String> {
+    ) -> Result<Vec<component_api::dusty::plugin::host::Mark>, String> {
         self.require_editor_capability(PluginCapability::Decorations)?;
         Ok(self
             .editor_requests
@@ -573,13 +573,13 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
         )
     }
 
-    fn take_editor_events(&mut self) -> Option<component_api::dust::plugin::host::EventBatch> {
+    fn take_editor_events(&mut self) -> Option<component_api::dusty::plugin::host::EventBatch> {
         self.editor_requests.delivery.events.take()
     }
 
     fn register_completion_source(
         &mut self,
-        source: component_api::dust::plugin::host::CompletionSource,
+        source: component_api::dusty::plugin::host::CompletionSource,
     ) -> Result<(), String> {
         self.require_editor_capability(PluginCapability::Completion)?;
         let bytes = source.name.len() + source.handler.len();
@@ -591,7 +591,7 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
 
     fn publish_completions(
         &mut self,
-        batch: component_api::dust::plugin::host::CompletionBatch,
+        batch: component_api::dusty::plugin::host::CompletionBatch,
     ) -> Result<(), String> {
         self.require_editor_capability(PluginCapability::Completion)?;
         if batch.items.len() > 4096 {
@@ -613,7 +613,7 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
 
     fn filter_lsp(
         &mut self,
-        filter: component_api::dust::plugin::host::LspFilter,
+        filter: component_api::dusty::plugin::host::LspFilter,
     ) -> Result<(), String> {
         self.require_editor_capability(PluginCapability::Commands)?;
         let bytes = filter.method.len() + filter.handler.len();
@@ -625,7 +625,7 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
 
     fn start_timer(
         &mut self,
-        request: component_api::dust::plugin::host::TimerRequest,
+        request: component_api::dusty::plugin::host::TimerRequest,
     ) -> Result<u64, String> {
         self.require_editor_capability(PluginCapability::Timers)?;
         if request.milliseconds == 0 || request.milliseconds > 86_400_000 {
@@ -650,7 +650,7 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
 
     fn request_http(
         &mut self,
-        request: component_api::dust::plugin::host::HttpRequest,
+        request: component_api::dusty::plugin::host::HttpRequest,
     ) -> Result<u64, String> {
         self.require_editor_capability(PluginCapability::Http)?;
         if request.headers.len() > 64 {
@@ -673,11 +673,11 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
         Ok(token)
     }
 
-    fn take_http_responses(&mut self) -> Vec<component_api::dust::plugin::host::HttpResponse> {
+    fn take_http_responses(&mut self) -> Vec<component_api::dusty::plugin::host::HttpResponse> {
         std::mem::take(&mut self.editor_requests.delivery.http)
     }
 
-    fn current_view(&mut self) -> Option<component_api::dust::plugin::host::ViewState> {
+    fn current_view(&mut self) -> Option<component_api::dusty::plugin::host::ViewState> {
         if self
             .capabilities
             .contains(&PluginCapability::ReadCurrentBuffer)
@@ -688,7 +688,7 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
         }
     }
 
-    fn current_buffer(&mut self) -> Result<component_api::dust::plugin::host::Snapshot, String> {
+    fn current_buffer(&mut self) -> Result<component_api::dusty::plugin::host::Snapshot, String> {
         if self
             .capabilities
             .contains(&PluginCapability::ReadCurrentBuffer)
@@ -704,7 +704,7 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
         &mut self,
         buffer: u64,
         revision: u64,
-        edits: Vec<component_api::dust::plugin::host::Edit>,
+        edits: Vec<component_api::dusty::plugin::host::Edit>,
     ) -> Result<u64, String> {
         if self.confirmation_result_only {
             return Err("confirmation result cannot propose edits".into());
@@ -774,8 +774,8 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
 
     fn queue_ui_request(
         &mut self,
-        request: component_api::dust::plugin::host::UiRequest,
-    ) -> Result<u64, component_api::dust::plugin::host::UiError> {
+        request: component_api::dusty::plugin::host::UiRequest,
+    ) -> Result<u64, component_api::dusty::plugin::host::UiError> {
         if !self.execution_available {
             return Err(component_ui_error(PluginUiError::new(
                 PluginUiErrorCode::InternalRejected,
@@ -785,9 +785,9 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
         if self.confirmation_result_only
             && !matches!(
                 request,
-                component_api::dust::plugin::host::UiRequest::ReplaceUi(_)
-                    | component_api::dust::plugin::host::UiRequest::ReplacePrivate(_)
-                    | component_api::dust::plugin::host::UiRequest::PatchPrivate(_)
+                component_api::dusty::plugin::host::UiRequest::ReplaceUi(_)
+                    | component_api::dusty::plugin::host::UiRequest::ReplacePrivate(_)
+                    | component_api::dusty::plugin::host::UiRequest::PatchPrivate(_)
             )
         {
             return Err(component_ui_error(PluginUiError::new(
@@ -828,7 +828,7 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
         Ok(token)
     }
 
-    fn take_ui_events(&mut self) -> Vec<component_api::dust::plugin::host::UiEvent> {
+    fn take_ui_events(&mut self) -> Vec<component_api::dusty::plugin::host::UiEvent> {
         let events = std::mem::take(&mut self.ui_events);
         for event in &events {
             self.pending_ui_tokens.remove(&event.token);
@@ -838,8 +838,8 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
 
     fn queue_confirmation(
         &mut self,
-        request: component_api::dust::plugin::host::ConfirmationRequest,
-    ) -> Result<u64, component_api::dust::plugin::host::ConfirmationError> {
+        request: component_api::dusty::plugin::host::ConfirmationRequest,
+    ) -> Result<u64, component_api::dusty::plugin::host::ConfirmationError> {
         if !self.confirmation_available || !self.confirmation_requests.is_empty() {
             return Err(component_confirmation_error(PluginConfirmationError::new(
                 PluginConfirmationErrorCode::QueueFull,
@@ -857,7 +857,7 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
                 .any(|character| character.is_control() && !matches!(character, '\n' | '\t'))
             || matches!(
                 request.default_answer,
-                component_api::dust::plugin::host::ConfirmationAnswer::Cancelled
+                component_api::dusty::plugin::host::ConfirmationAnswer::Cancelled
             )
         {
             return Err(component_confirmation_error(PluginConfirmationError::new(
@@ -884,11 +884,11 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
 
     fn take_confirmation_results(
         &mut self,
-    ) -> Vec<component_api::dust::plugin::host::ConfirmationResult> {
+    ) -> Vec<component_api::dusty::plugin::host::ConfirmationResult> {
         std::mem::take(&mut self.confirmation_results)
     }
 
-    fn take_host_events(&mut self) -> Vec<component_api::dust::plugin::host::HostEvent> {
+    fn take_host_events(&mut self) -> Vec<component_api::dusty::plugin::host::HostEvent> {
         if self
             .capabilities
             .contains(&PluginCapability::EventSubscriptions)
@@ -925,8 +925,8 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
 
     fn queue_storage_request(
         &mut self,
-        request: component_api::dust::plugin::host::StorageRequest,
-    ) -> Result<u64, component_api::dust::plugin::host::StorageError> {
+        request: component_api::dusty::plugin::host::StorageRequest,
+    ) -> Result<u64, component_api::dusty::plugin::host::StorageError> {
         if !self.execution_available || self.confirmation_result_only {
             return Err(component_storage_error(PluginStorageError::new(
                 PluginStorageErrorCode::Unavailable,
@@ -984,7 +984,7 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
         Ok(token)
     }
 
-    fn take_storage_results(&mut self) -> Vec<component_api::dust::plugin::host::StorageResult> {
+    fn take_storage_results(&mut self) -> Vec<component_api::dusty::plugin::host::StorageResult> {
         if self.capabilities.contains(&PluginCapability::PluginStorage) {
             let results = std::mem::take(&mut self.storage_results);
             for result in &results {
@@ -998,7 +998,7 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
 
     fn take_picker_provider_requests(
         &mut self,
-    ) -> Vec<component_api::dust::plugin::host::PickerProviderRequest> {
+    ) -> Vec<component_api::dusty::plugin::host::PickerProviderRequest> {
         if self
             .capabilities
             .contains(&PluginCapability::PickerProviders)
@@ -1011,8 +1011,8 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
 
     fn queue_picker_provider_chunk(
         &mut self,
-        chunk: component_api::dust::plugin::host::PickerProviderChunk,
-    ) -> Result<(), component_api::dust::plugin::host::ProviderError> {
+        chunk: component_api::dusty::plugin::host::PickerProviderChunk,
+    ) -> Result<(), component_api::dusty::plugin::host::ProviderError> {
         if self.confirmation_result_only {
             return Err(component_provider_error(PluginProviderError::new(
                 PluginProviderErrorCode::Unavailable,
@@ -1042,7 +1042,7 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
         }
         let terminal_is_error = matches!(
             chunk.terminal.kind,
-            component_api::dust::plugin::host::ProviderTerminalKind::Error
+            component_api::dusty::plugin::host::ProviderTerminalKind::Error
         );
         if terminal_is_error != chunk.terminal.error.is_some() {
             return Err(component_provider_error(PluginProviderError::new(
@@ -1071,7 +1071,7 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
 
     fn take_virtual_document_requests(
         &mut self,
-    ) -> Vec<component_api::dust::plugin::host::VirtualDocumentRequest> {
+    ) -> Vec<component_api::dusty::plugin::host::VirtualDocumentRequest> {
         if self
             .capabilities
             .contains(&PluginCapability::VirtualDocuments)
@@ -1084,8 +1084,8 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
 
     fn queue_virtual_document_proposal(
         &mut self,
-        proposal: component_api::dust::plugin::host::VirtualDocumentProposal,
-    ) -> Result<(), component_api::dust::plugin::host::VirtualDocumentError> {
+        proposal: component_api::dusty::plugin::host::VirtualDocumentProposal,
+    ) -> Result<(), component_api::dusty::plugin::host::VirtualDocumentError> {
         if self.confirmation_result_only {
             return Err(component_virtual_document_error(
                 PluginVirtualDocumentError::new(
@@ -1179,9 +1179,9 @@ fn virtual_document_proposal_bytes(proposal: &PluginVirtualDocumentProposal) -> 
 }
 
 pub(super) fn internal_confirmation_answer(
-    answer: component_api::dust::plugin::host::ConfirmationAnswer,
+    answer: component_api::dusty::plugin::host::ConfirmationAnswer,
 ) -> PluginConfirmationAnswer {
-    use component_api::dust::plugin::host::ConfirmationAnswer as A;
+    use component_api::dusty::plugin::host::ConfirmationAnswer as A;
     match answer {
         A::Yes => PluginConfirmationAnswer::Yes,
         A::No => PluginConfirmationAnswer::No,
@@ -1191,8 +1191,8 @@ pub(super) fn internal_confirmation_answer(
 
 pub(super) fn component_confirmation_answer(
     answer: PluginConfirmationAnswer,
-) -> component_api::dust::plugin::host::ConfirmationAnswer {
-    use component_api::dust::plugin::host::ConfirmationAnswer as A;
+) -> component_api::dusty::plugin::host::ConfirmationAnswer {
+    use component_api::dusty::plugin::host::ConfirmationAnswer as A;
     match answer {
         PluginConfirmationAnswer::Yes => A::Yes,
         PluginConfirmationAnswer::No => A::No,
@@ -1202,9 +1202,9 @@ pub(super) fn component_confirmation_answer(
 
 pub(super) fn component_confirmation_error(
     error: PluginConfirmationError,
-) -> component_api::dust::plugin::host::ConfirmationError {
-    use component_api::dust::plugin::host::ConfirmationErrorCode as C;
-    component_api::dust::plugin::host::ConfirmationError {
+) -> component_api::dusty::plugin::host::ConfirmationError {
+    use component_api::dusty::plugin::host::ConfirmationErrorCode as C;
+    component_api::dusty::plugin::host::ConfirmationError {
         code: match error.code {
             PluginConfirmationErrorCode::QueueFull => C::QueueFull,
             PluginConfirmationErrorCode::InvalidRequest => C::InvalidRequest,
@@ -1218,9 +1218,9 @@ pub(super) fn component_confirmation_error(
 
 pub(super) fn component_confirmation_result(
     result: PluginConfirmationResult,
-) -> component_api::dust::plugin::host::ConfirmationResult {
-    use component_api::dust::plugin::host::ConfirmationOutcome as O;
-    component_api::dust::plugin::host::ConfirmationResult {
+) -> component_api::dusty::plugin::host::ConfirmationResult {
+    use component_api::dusty::plugin::host::ConfirmationOutcome as O;
+    component_api::dusty::plugin::host::ConfirmationResult {
         request: result.request,
         outcome: match result.outcome {
             PluginConfirmationOutcome::Answered(answer) => {
@@ -1235,9 +1235,9 @@ pub(super) fn component_confirmation_result(
 
 pub(super) fn component_virtual_document_request(
     request: PluginVirtualDocumentRequest,
-) -> component_api::dust::plugin::host::VirtualDocumentRequest {
-    use component_api::dust::plugin::host::VirtualDocumentRequestKind as K;
-    component_api::dust::plugin::host::VirtualDocumentRequest {
+) -> component_api::dusty::plugin::host::VirtualDocumentRequest {
+    use component_api::dusty::plugin::host::VirtualDocumentRequestKind as K;
+    component_api::dusty::plugin::host::VirtualDocumentRequest {
         request: request.request,
         document: request.document,
         source: request.source,
@@ -1257,9 +1257,9 @@ pub(super) fn component_virtual_document_request(
     }
 }
 pub(super) fn convert_component_virtual_document_proposal(
-    p: component_api::dust::plugin::host::VirtualDocumentProposal,
+    p: component_api::dusty::plugin::host::VirtualDocumentProposal,
 ) -> Result<PluginVirtualDocumentProposal, PluginVirtualDocumentError> {
-    use component_api::dust::plugin::host::VirtualDocumentProposalKind as K;
+    use component_api::dusty::plugin::host::VirtualDocumentProposalKind as K;
     let kind = match p.kind {
         K::Full(f) => {
             if f.title.len() > VIRTUAL_DOCUMENT_TITLE_BYTE_LIMIT
@@ -1324,9 +1324,9 @@ pub(super) fn convert_component_virtual_document_proposal(
     })
 }
 pub(super) fn internal_virtual_document_error(
-    e: component_api::dust::plugin::host::VirtualDocumentError,
+    e: component_api::dusty::plugin::host::VirtualDocumentError,
 ) -> PluginVirtualDocumentError {
-    use component_api::dust::plugin::host::VirtualDocumentErrorCode as C;
+    use component_api::dusty::plugin::host::VirtualDocumentErrorCode as C;
     PluginVirtualDocumentError::new(
         match e.code {
             C::QueueFull => PluginVirtualDocumentErrorCode::QueueFull,
@@ -1353,9 +1353,9 @@ pub(super) fn internal_virtual_document_error(
 }
 pub(super) fn component_virtual_document_error(
     e: PluginVirtualDocumentError,
-) -> component_api::dust::plugin::host::VirtualDocumentError {
-    use component_api::dust::plugin::host::VirtualDocumentErrorCode as C;
-    component_api::dust::plugin::host::VirtualDocumentError {
+) -> component_api::dusty::plugin::host::VirtualDocumentError {
+    use component_api::dusty::plugin::host::VirtualDocumentErrorCode as C;
+    component_api::dusty::plugin::host::VirtualDocumentError {
         code: match e.code {
             PluginVirtualDocumentErrorCode::QueueFull => C::QueueFull,
             PluginVirtualDocumentErrorCode::UnknownSource => C::UnknownSource,
@@ -1382,8 +1382,8 @@ pub(super) fn component_virtual_document_error(
 
 pub(super) fn component_provider_request(
     request: PluginPickerRequestEnvelope,
-) -> component_api::dust::plugin::host::PickerProviderRequest {
-    component_api::dust::plugin::host::PickerProviderRequest {
+) -> component_api::dusty::plugin::host::PickerProviderRequest {
+    component_api::dusty::plugin::host::PickerProviderRequest {
         id: request.id,
         provider: request.provider,
         query: request.query,
@@ -1398,9 +1398,9 @@ pub(super) fn component_provider_request(
 }
 
 pub(super) fn convert_component_provider_chunk(
-    chunk: component_api::dust::plugin::host::PickerProviderChunk,
+    chunk: component_api::dusty::plugin::host::PickerProviderChunk,
 ) -> PluginPickerChunk {
-    use component_api::dust::plugin::host::ProviderTerminalKind;
+    use component_api::dusty::plugin::host::ProviderTerminalKind;
     let terminal = match chunk.terminal.kind {
         ProviderTerminalKind::More => PluginProviderTerminal::More,
         ProviderTerminalKind::Complete => PluginProviderTerminal::Complete,
@@ -1436,9 +1436,9 @@ pub(super) fn convert_component_provider_chunk(
 }
 
 pub(super) fn internal_provider_error(
-    error: component_api::dust::plugin::host::ProviderError,
+    error: component_api::dusty::plugin::host::ProviderError,
 ) -> PluginProviderError {
-    use component_api::dust::plugin::host::ProviderErrorCode;
+    use component_api::dusty::plugin::host::ProviderErrorCode;
     PluginProviderError::new(
         match error.code {
             ProviderErrorCode::QueueFull => PluginProviderErrorCode::QueueFull,
@@ -1462,9 +1462,9 @@ pub(super) fn internal_provider_error(
 
 pub(super) fn component_provider_error(
     error: PluginProviderError,
-) -> component_api::dust::plugin::host::ProviderError {
-    use component_api::dust::plugin::host::ProviderErrorCode;
-    component_api::dust::plugin::host::ProviderError {
+) -> component_api::dusty::plugin::host::ProviderError {
+    use component_api::dusty::plugin::host::ProviderErrorCode;
+    component_api::dusty::plugin::host::ProviderError {
         code: match error.code {
             PluginProviderErrorCode::QueueFull => ProviderErrorCode::QueueFull,
             PluginProviderErrorCode::UnknownRequest => ProviderErrorCode::UnknownRequest,
@@ -1486,9 +1486,9 @@ pub(super) fn component_provider_error(
 }
 
 pub(super) fn convert_component_storage_request(
-    request: component_api::dust::plugin::host::StorageRequest,
+    request: component_api::dusty::plugin::host::StorageRequest,
 ) -> PluginStorageRequestKind {
-    use component_api::dust::plugin::host::StorageRequest;
+    use component_api::dusty::plugin::host::StorageRequest;
     match request {
         StorageRequest::Get(key) => PluginStorageRequestKind::Get { key },
         StorageRequest::CompareAndSet(request) => PluginStorageRequestKind::CompareAndSet {
@@ -1509,9 +1509,9 @@ pub(super) fn convert_component_storage_request(
 
 pub(super) fn component_storage_error(
     error: PluginStorageError,
-) -> component_api::dust::plugin::host::StorageError {
-    use component_api::dust::plugin::host::StorageErrorCode;
-    component_api::dust::plugin::host::StorageError {
+) -> component_api::dusty::plugin::host::StorageError {
+    use component_api::dusty::plugin::host::StorageErrorCode;
+    component_api::dusty::plugin::host::StorageError {
         code: match error.code {
             PluginStorageErrorCode::QueueFull => StorageErrorCode::QueueFull,
             PluginStorageErrorCode::InvalidKey => StorageErrorCode::InvalidKey,
@@ -1528,15 +1528,15 @@ pub(super) fn component_storage_error(
 
 pub(super) fn component_storage_result(
     result: PluginStorageResult,
-) -> component_api::dust::plugin::host::StorageResult {
-    component_api::dust::plugin::host::StorageResult {
+) -> component_api::dusty::plugin::host::StorageResult {
+    component_api::dusty::plugin::host::StorageResult {
         token: result.token,
         value: result.value,
         revision: result.revision,
         entries: result
             .entries
             .into_iter()
-            .map(|entry| component_api::dust::plugin::host::StorageEntry {
+            .map(|entry| component_api::dusty::plugin::host::StorageEntry {
                 key: entry.key,
                 revision: entry.revision,
                 value: entry.value,
@@ -1549,8 +1549,8 @@ pub(super) fn component_storage_result(
 
 pub(super) fn component_ui_error(
     error: PluginUiError,
-) -> component_api::dust::plugin::host::UiError {
-    use component_api::dust::plugin::host::UiErrorCode;
+) -> component_api::dusty::plugin::host::UiError {
+    use component_api::dusty::plugin::host::UiErrorCode;
     let code = match error.code {
         PluginUiErrorCode::QueueFull => UiErrorCode::QueueFull,
         PluginUiErrorCode::StaleGraph => UiErrorCode::StaleGraph,
@@ -1581,7 +1581,7 @@ pub(super) fn component_ui_error(
         PluginUiErrorCode::InvalidHitRegion => UiErrorCode::InvalidHitRegion,
         PluginUiErrorCode::PatchLimit => UiErrorCode::PatchLimit,
     };
-    component_api::dust::plugin::host::UiError {
+    component_api::dusty::plugin::host::UiError {
         code,
         detail: error.detail,
     }
@@ -1639,7 +1639,7 @@ fn ui_request_bytes(kind: &PluginUiRequestKind) -> usize {
 }
 
 pub(super) fn convert_component_tree(
-    tree: component_api::dust::plugin::host::UiTree,
+    tree: component_api::dusty::plugin::host::UiTree,
 ) -> Result<PluginUiTree, PluginUiError> {
     if tree.nodes.len() > 256
         || tree.nodes.iter().any(|node| {
@@ -1668,22 +1668,22 @@ pub(super) fn convert_component_tree(
         .map(|node| PluginUiNode {
             id: node.id,
             kind: match node.kind {
-                component_api::dust::plugin::host::UiNodeKind::Container => {
+                component_api::dusty::plugin::host::UiNodeKind::Container => {
                     PluginUiNodeKind::Container
                 }
-                component_api::dust::plugin::host::UiNodeKind::Text => PluginUiNodeKind::Text,
-                component_api::dust::plugin::host::UiNodeKind::ListNode => PluginUiNodeKind::List,
-                component_api::dust::plugin::host::UiNodeKind::Button => PluginUiNodeKind::Button,
+                component_api::dusty::plugin::host::UiNodeKind::Text => PluginUiNodeKind::Text,
+                component_api::dusty::plugin::host::UiNodeKind::ListNode => PluginUiNodeKind::List,
+                component_api::dusty::plugin::host::UiNodeKind::Button => PluginUiNodeKind::Button,
             },
             text: node.text,
             style: match node.style {
-                component_api::dust::plugin::host::UiStyle::Default => PluginUiStyle::Default,
-                component_api::dust::plugin::host::UiStyle::Muted => PluginUiStyle::Muted,
-                component_api::dust::plugin::host::UiStyle::Accent => PluginUiStyle::Accent,
-                component_api::dust::plugin::host::UiStyle::Warning => PluginUiStyle::Warning,
-                component_api::dust::plugin::host::UiStyle::Error => PluginUiStyle::Error,
-                component_api::dust::plugin::host::UiStyle::Selected => PluginUiStyle::Selected,
-                component_api::dust::plugin::host::UiStyle::Border => PluginUiStyle::Border,
+                component_api::dusty::plugin::host::UiStyle::Default => PluginUiStyle::Default,
+                component_api::dusty::plugin::host::UiStyle::Muted => PluginUiStyle::Muted,
+                component_api::dusty::plugin::host::UiStyle::Accent => PluginUiStyle::Accent,
+                component_api::dusty::plugin::host::UiStyle::Warning => PluginUiStyle::Warning,
+                component_api::dusty::plugin::host::UiStyle::Error => PluginUiStyle::Error,
+                component_api::dusty::plugin::host::UiStyle::Selected => PluginUiStyle::Selected,
+                component_api::dusty::plugin::host::UiStyle::Border => PluginUiStyle::Border,
             },
             action: node.action,
             children: node.children,
@@ -1697,14 +1697,14 @@ pub(super) fn convert_component_tree(
 }
 
 pub(super) fn convert_component_placement(
-    placement: component_api::dust::plugin::host::WindowPlacement,
+    placement: component_api::dusty::plugin::host::WindowPlacement,
     x: u16,
     y: u16,
     width: u16,
     height: u16,
     size: u16,
 ) -> PluginRequestedPlacement {
-    use component_api::dust::plugin::host::WindowPlacement;
+    use component_api::dusty::plugin::host::WindowPlacement;
     match placement {
         WindowPlacement::DockedLeft => PluginRequestedPlacement::DockedLeft { size },
         WindowPlacement::DockedRight => PluginRequestedPlacement::DockedRight { size },
@@ -1722,24 +1722,24 @@ pub(super) fn convert_component_placement(
 }
 
 pub(super) fn convert_private_style(
-    style: component_api::dust::plugin::host::PrivateStyle,
+    style: component_api::dusty::plugin::host::PrivateStyle,
 ) -> PluginPrivateStyle {
     PluginPrivateStyle {
         id: style.id,
         style: match style.style {
-            component_api::dust::plugin::host::UiStyle::Default => PluginUiStyle::Default,
-            component_api::dust::plugin::host::UiStyle::Muted => PluginUiStyle::Muted,
-            component_api::dust::plugin::host::UiStyle::Accent => PluginUiStyle::Accent,
-            component_api::dust::plugin::host::UiStyle::Warning => PluginUiStyle::Warning,
-            component_api::dust::plugin::host::UiStyle::Error => PluginUiStyle::Error,
-            component_api::dust::plugin::host::UiStyle::Selected => PluginUiStyle::Selected,
-            component_api::dust::plugin::host::UiStyle::Border => PluginUiStyle::Border,
+            component_api::dusty::plugin::host::UiStyle::Default => PluginUiStyle::Default,
+            component_api::dusty::plugin::host::UiStyle::Muted => PluginUiStyle::Muted,
+            component_api::dusty::plugin::host::UiStyle::Accent => PluginUiStyle::Accent,
+            component_api::dusty::plugin::host::UiStyle::Warning => PluginUiStyle::Warning,
+            component_api::dusty::plugin::host::UiStyle::Error => PluginUiStyle::Error,
+            component_api::dusty::plugin::host::UiStyle::Selected => PluginUiStyle::Selected,
+            component_api::dusty::plugin::host::UiStyle::Border => PluginUiStyle::Border,
         },
     }
 }
 
 pub(super) fn convert_private_cell(
-    cell: component_api::dust::plugin::host::PrivateCell,
+    cell: component_api::dusty::plugin::host::PrivateCell,
 ) -> PluginPrivateCell {
     PluginPrivateCell {
         x: cell.x,
@@ -1751,7 +1751,7 @@ pub(super) fn convert_private_cell(
 }
 
 pub(super) fn convert_private_hit(
-    hit: component_api::dust::plugin::host::PrivateHitRegion,
+    hit: component_api::dusty::plugin::host::PrivateHitRegion,
 ) -> PluginPrivateHitRegion {
     PluginPrivateHitRegion {
         x: hit.x,
@@ -1763,7 +1763,7 @@ pub(super) fn convert_private_hit(
 }
 
 pub(super) fn convert_private_snapshot(
-    snapshot: component_api::dust::plugin::host::PrivateSnapshot,
+    snapshot: component_api::dusty::plugin::host::PrivateSnapshot,
 ) -> PluginPrivateSnapshot {
     PluginPrivateSnapshot {
         revision: snapshot.revision,
@@ -1791,7 +1791,7 @@ pub(super) fn convert_private_snapshot(
 }
 
 pub(super) fn convert_private_patch(
-    patch: component_api::dust::plugin::host::PrivatePatch,
+    patch: component_api::dusty::plugin::host::PrivatePatch,
 ) -> PluginPrivatePatch {
     PluginPrivatePatch {
         revision: patch.revision,
@@ -1828,10 +1828,10 @@ pub(super) fn convert_private_patch(
 }
 
 pub(super) fn convert_component_ui_request(
-    request: component_api::dust::plugin::host::UiRequest,
+    request: component_api::dusty::plugin::host::UiRequest,
     declared_content_types: &BTreeSet<String>,
 ) -> Result<PluginUiRequestKind, PluginUiError> {
-    use component_api::dust::plugin::host::UiRequest;
+    use component_api::dusty::plugin::host::UiRequest;
     Ok(match request {
         UiRequest::OpenWindow(request) => {
             if !declared_content_types.contains(&request.content_type) {

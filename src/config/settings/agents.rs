@@ -16,8 +16,8 @@ pub struct AgentProfileConfig {
     /// Set for both `program` and `cli`.
     #[serde(default)]
     pub environment: BTreeMap<String, String>,
-    /// Set for `program` only, on top of `environment`: settings for when Dust drives the
-    /// agent, such as turning its own subagents off because Dust's `agent` tool gives them.
+    /// Set for `program` only, on top of `environment`: settings for when Dusty drives the
+    /// agent, such as turning its own subagents off because Dusty's `agent` tool gives them.
     #[serde(default)]
     pub acp_environment: BTreeMap<String, String>,
     /// Session options to choose once the agent starts, by option id or category, such as
@@ -28,8 +28,8 @@ pub struct AgentProfileConfig {
     /// Claude Code may use.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<serde_json::Value>,
-    /// The command that adds Dust's tools to an agent that reads MCP servers only from its own
-    /// config, such as `pi mcp add`; `{dust}` stands for this Dust program. Dust runs it before
+    /// The command that adds Dusty's tools to an agent that reads MCP servers only from its own
+    /// config, such as `pi mcp add`; `{dusty}` stands for this Dusty program. Dusty runs it before
     /// the agent starts when `agents.add_tools` is on.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub add_tools: Vec<String>,
@@ -43,7 +43,7 @@ pub struct AgentProfileConfig {
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentConnection {
-    /// Through the Agent Client Protocol, in Dust's agent panel.
+    /// Through the Agent Client Protocol, in Dusty's agent panel.
     #[default]
     Acp,
     /// The agent's own program in a terminal tab.

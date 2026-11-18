@@ -5,7 +5,7 @@ from greet import hello
 
 class GreetTest(unittest.TestCase):
     def test_hello_greets_by_name(self):
-        self.assertEqual(hello("Dust"), "Hello, Dust!")
+        self.assertEqual(hello("Dusty"), "Hello, Dusty!")
 
 
 if __name__ == "__main__":

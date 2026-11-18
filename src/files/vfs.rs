@@ -390,7 +390,7 @@ impl VfsWorker {
         #[cfg(test)]
         let gate = START_GATE.with(|gate| gate.borrow_mut().take());
         let thread = thread::Builder::new()
-            .name("dust-vfs".into())
+            .name("dusty-vfs".into())
             .spawn(move || {
                 let _finished = WorkerFinished(worker_finished);
                 #[cfg(test)]
@@ -2698,7 +2698,7 @@ pub(super) fn agent_atomic_write(root: &Path, path: &Path, bytes: &[u8]) -> Resu
         let (temporary_name, mut temporary) = loop {
             attempts += 1;
             let sequence = NEXT_TEMPORARY.fetch_add(1, Ordering::Relaxed);
-            let temporary_name = format!(".dust-{}-{sequence}.tmp", std::process::id());
+            let temporary_name = format!(".dusty-{}-{sequence}.tmp", std::process::id());
             if std::ffi::OsStr::new(&temporary_name) == name {
                 continue;
             }

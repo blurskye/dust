@@ -1,4 +1,4 @@
-# Adapted to Dust semantic roles and terminal fallbacks; not the upstream editor implementation.
+# Adapted to Dusty semantic roles and terminal fallbacks; not the upstream editor implementation.
 # Palette source: README.md. License: ../../LICENSES/MIT-rose-pine.txt
 name = "rose-pine-moon"
 

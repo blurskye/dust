@@ -7,35 +7,35 @@
 #[path = "support/forge_fake.rs"]
 mod forge_fake;
 
-use dust::forge::cli::CliTransport;
-use dust::forge::credential::Credential;
-use dust::forge::credential::CredentialSource;
-use dust::forge::credential::Secret;
-use dust::forge::http::HttpTransport;
-use dust::forge::model::ItemId;
-use dust::forge::model::ItemKind;
-use dust::forge::model::MergeMethod;
-use dust::forge::provider;
-use dust::forge::provider::Conditional;
-use dust::forge::provider::Fetched;
-use dust::forge::provider::ForgeContext;
-use dust::forge::provider::ProviderKind;
-use dust::forge::provider::RepoRef;
-use dust::forge::request::Filter;
-use dust::forge::request::ForgeError;
-use dust::forge::request::Page;
-use dust::forge::request::Payload;
-use dust::forge::request::Read;
-use dust::forge::request::RunFilter;
-use dust::forge::request::StateFilter;
-use dust::forge::request::Write;
-use dust::forge::transport;
-use dust::forge::transport::Cli;
-use dust::forge::transport::ConnectOptions;
-use dust::forge::transport::Endpoints;
-use dust::forge::transport::HostKey;
-use dust::forge::transport::Transport;
-use dust::forge::transport::TransportKind;
+use dusty::forge::cli::CliTransport;
+use dusty::forge::credential::Credential;
+use dusty::forge::credential::CredentialSource;
+use dusty::forge::credential::Secret;
+use dusty::forge::http::HttpTransport;
+use dusty::forge::model::ItemId;
+use dusty::forge::model::ItemKind;
+use dusty::forge::model::MergeMethod;
+use dusty::forge::provider;
+use dusty::forge::provider::Conditional;
+use dusty::forge::provider::Fetched;
+use dusty::forge::provider::ForgeContext;
+use dusty::forge::provider::ProviderKind;
+use dusty::forge::provider::RepoRef;
+use dusty::forge::request::Filter;
+use dusty::forge::request::ForgeError;
+use dusty::forge::request::Page;
+use dusty::forge::request::Payload;
+use dusty::forge::request::Read;
+use dusty::forge::request::RunFilter;
+use dusty::forge::request::StateFilter;
+use dusty::forge::request::Write;
+use dusty::forge::transport;
+use dusty::forge::transport::Cli;
+use dusty::forge::transport::ConnectOptions;
+use dusty::forge::transport::Endpoints;
+use dusty::forge::transport::HostKey;
+use dusty::forge::transport::Transport;
+use dusty::forge::transport::TransportKind;
 use forge_fake::FAKE_TOKEN;
 use forge_fake::ForgeServer;
 use serde_json::Value;
@@ -145,7 +145,7 @@ fn read(ctx: &ForgeContext, read: Read) -> Result<Payload, ForgeError> {
     }
 }
 
-fn write(ctx: &ForgeContext, write: Write) -> Result<dust::forge::request::Receipt, ForgeError> {
+fn write(ctx: &ForgeContext, write: Write) -> Result<dusty::forge::request::Receipt, ForgeError> {
     provider::build(ProviderKind::GitHub)
         .unwrap()
         .write(ctx, &write, &AtomicBool::new(false))
@@ -546,13 +546,13 @@ fn no_token_reaches_argv_logs_or_error_text() {
     };
     assert!(!format!("{credential:?} {}", credential.token).contains(FAKE_TOKEN));
     // gh's argv for a write carries the body on stdin and no token, whatever the body says.
-    let request = dust::forge::transport::ApiRequest::new(
-        dust::forge::transport::Method::Post,
+    let request = dusty::forge::transport::ApiRequest::new(
+        dusty::forge::transport::Method::Post,
         "repos/example/demo/issues/7/comments",
     )
     .json(json!({ "body": FAKE_TOKEN }));
     let (argv, stdin, env) =
-        dust::forge::cli::argv(Cli::Gh, &HostKey::new("github.com"), &request, None);
+        dusty::forge::cli::argv(Cli::Gh, &HostKey::new("github.com"), &request, None);
     assert!(!argv.iter().any(|arg| arg.contains(FAKE_TOKEN)), "{argv:?}");
     assert!(argv.windows(2).any(|pair| pair == ["--input", "-"]));
     assert!(
@@ -581,7 +581,7 @@ fn passthrough_output_parses_as_an_http_response() {
         .output()
         .unwrap();
     assert!(output.status.success());
-    let response = dust::forge::cli::parse_included(&output.stdout).unwrap();
+    let response = dusty::forge::cli::parse_included(&output.stdout).unwrap();
     assert_eq!(response.status, 200);
     assert!(
         response
@@ -602,7 +602,7 @@ fn passthrough_output_parses_as_an_http_response() {
         .output()
         .unwrap();
     assert!(!output.status.success());
-    let response = dust::forge::cli::parse_included(&output.stdout).unwrap();
+    let response = dusty::forge::cli::parse_included(&output.stdout).unwrap();
     assert_eq!(response.status, 404);
     assert!(String::from_utf8_lossy(&output.stderr).contains("(HTTP 404)"));
 }

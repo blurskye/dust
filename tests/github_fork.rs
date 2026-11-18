@@ -1,7 +1,7 @@
 #![cfg(unix)]
-use dust::editor::input::{KeyCode, KeyEvent, Modifiers};
-use dust::git::screen::GitScreen;
-use dust::ui::{KeyInputKind, UiEvent};
+use dusty::editor::input::{KeyCode, KeyEvent, Modifiers};
+use dusty::git::screen::GitScreen;
+use dusty::ui::{KeyInputKind, UiEvent};
 use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -59,7 +59,7 @@ fn git(root: &Path, args: &[&str]) -> String {
 }
 /// The fake forge server's request log in the gh-CLI form the legacy fixture logged.
 fn calls() -> Vec<Vec<String>> {
-    forge_fake::calls(Path::new(&std::env::var("DUST_GITHUB_FIXTURE").unwrap()))
+    forge_fake::calls(Path::new(&std::env::var("DUSTY_GITHUB_FIXTURE").unwrap()))
 }
 fn creates() -> usize {
     calls()
@@ -78,7 +78,7 @@ fn review(screen: &mut GitScreen) {
 
 #[test]
 fn fork_submission_reviews_exact_targets_and_recovers_after_push() {
-    if std::env::var_os("DUST_FORK_CHILD").is_none() {
+    if std::env::var_os("DUSTY_FORK_CHILD").is_none() {
         let owner = tempfile::tempdir().unwrap();
         let root = owner.path().join("repo");
         std::fs::create_dir(&root).unwrap();
@@ -106,10 +106,10 @@ fn fork_submission_reviews_exact_targets_and_recovers_after_push() {
         let state = owner.path().join("github.json");
         let server = forge_fake::ForgeServer::start(&state, "legacy");
         server.install_gh(&bin);
-        let git_executable = dust::tools::discover_executable("git").unwrap();
+        let git_executable = dusty::tools::discover_executable("git").unwrap();
         let wrapper = bin.join("git");
         // The real push writes only to our disposable bare repository; all other Git calls are real.
-        forge_fake::write_executable(&wrapper, b"#!/usr/bin/env python3\nimport os,sys\na=sys.argv[1:]\nif a[:3]==['push','--','https://github.com/team/demo-fork.git']:\n a[2]=os.environ['DUST_FORK_BARE']\nos.execv(os.environ['DUST_REAL_GIT'],['git']+a)\n");
+        forge_fake::write_executable(&wrapper, b"#!/usr/bin/env python3\nimport os,sys\na=sys.argv[1:]\nif a[:3]==['push','--','https://github.com/team/demo-fork.git']:\n a[2]=os.environ['DUSTY_FORK_BARE']\nos.execv(os.environ['DUSTY_REAL_GIT'],['git']+a)\n");
         std::fs::write(&state, serde_json::json!({"calls":[],"comments":[],"fail_create":1,"repo_info":{
             "team/demo-fork":{"full_name":"team/demo-fork","default_branch":"fork-default","fork":true,"parent":{"full_name":"team/demo","default_branch":"trunk"}}
         }}).to_string()).unwrap();
@@ -120,11 +120,11 @@ fn fork_submission_reviews_exact_targets_and_recovers_after_push() {
                 "fork_submission_reviews_exact_targets_and_recovers_after_push",
                 "--nocapture",
             ])
-            .env("DUST_FORK_CHILD", "1")
-            .env("DUST_GITHUB_FIXTURE", &state)
-            .env("DUST_GITHUB_ROOT", &root)
-            .env("DUST_FORK_BARE", &bare)
-            .env("DUST_REAL_GIT", git_executable)
+            .env("DUSTY_FORK_CHILD", "1")
+            .env("DUSTY_GITHUB_FIXTURE", &state)
+            .env("DUSTY_GITHUB_ROOT", &root)
+            .env("DUSTY_FORK_BARE", &bare)
+            .env("DUSTY_REAL_GIT", git_executable)
             .env(
                 "PATH",
                 format!("{}:{}", bin.display(), std::env::var("PATH").unwrap()),
@@ -139,9 +139,9 @@ fn fork_submission_reviews_exact_targets_and_recovers_after_push() {
         );
         return;
     }
-    let root = std::env::var("DUST_GITHUB_ROOT").unwrap();
+    let root = std::env::var("DUSTY_GITHUB_ROOT").unwrap();
     let root = Path::new(&root);
-    let bare = std::env::var("DUST_FORK_BARE").unwrap();
+    let bare = std::env::var("DUSTY_FORK_BARE").unwrap();
     let bare = Path::new(&bare);
     let mut screen = GitScreen::open(root).unwrap();
     // Pull requests is the tab right after Git.

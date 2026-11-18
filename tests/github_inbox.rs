@@ -2,9 +2,9 @@
 //! Multi-repository inbox acceptance tests. Each test re-execs against a private fake forge
 //! server and fake gh, with GH_HOST, Git config and an unborn local repository; no network or
 //! checkout.
-use dust::editor::input::{KeyCode, KeyEvent, Modifiers};
-use dust::git::screen::GitScreen;
-use dust::ui::{KeyInputKind, UiEvent};
+use dusty::editor::input::{KeyCode, KeyEvent, Modifiers};
+use dusty::git::screen::GitScreen;
+use dusty::ui::{KeyInputKind, UiEvent};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -42,7 +42,7 @@ fn shown(screen: &mut GitScreen) -> String {
         .join("\n")
 }
 fn state_path() -> PathBuf {
-    std::env::var_os("DUST_INBOX_STATE").unwrap().into()
+    std::env::var_os("DUSTY_INBOX_STATE").unwrap().into()
 }
 fn state() -> Value {
     serde_json::from_slice(&std::fs::read(state_path()).unwrap()).unwrap()
@@ -79,7 +79,7 @@ fn fixture_child(name: &str, host: &str, gh_host: &str) -> bool {
     fixture_child_with_root(name, host, gh_host, false)
 }
 fn fixture_child_with_root(name: &str, host: &str, gh_host: &str, committed_dirty: bool) -> bool {
-    if std::env::var_os("DUST_INBOX_CHILD").is_some() {
+    if std::env::var_os("DUSTY_INBOX_CHILD").is_some() {
         return false;
     }
     let owner = tempfile::tempdir().unwrap();
@@ -115,10 +115,10 @@ fn fixture_child_with_root(name: &str, host: &str, gh_host: &str, committed_dirt
     server.configure(&mut command);
     command
         .args(["--exact", name, "--nocapture"])
-        .env("DUST_INBOX_CHILD", "1")
-        .env("DUST_INBOX_ROOT", &root)
-        .env("DUST_INBOX_HOST", host)
-        .env("DUST_INBOX_STATE", &state)
+        .env("DUSTY_INBOX_CHILD", "1")
+        .env("DUSTY_INBOX_ROOT", &root)
+        .env("DUSTY_INBOX_HOST", host)
+        .env("DUSTY_INBOX_STATE", &state)
         .env(
             "PATH",
             format!("{}:{}", bin.display(), std::env::var("PATH").unwrap()),
@@ -140,7 +140,7 @@ fn fixture_child_with_root(name: &str, host: &str, gh_host: &str, committed_dirt
 fn open(initial: Value) -> GitScreen {
     std::fs::write(state_path(), initial.to_string()).unwrap();
     let mut screen =
-        GitScreen::open(Path::new(&std::env::var("DUST_INBOX_ROOT").unwrap())).unwrap();
+        GitScreen::open(Path::new(&std::env::var("DUSTY_INBOX_ROOT").unwrap())).unwrap();
     // Top tabs run Git → Pull requests → Issues → Actions; visit Issues, then back to PRs.
     key(&mut screen, KeyCode::Char('>'));
     key(&mut screen, KeyCode::Char('>'));
@@ -154,7 +154,7 @@ fn open(initial: Value) -> GitScreen {
     screen
 }
 fn assert_local_source_unchanged() {
-    let root = PathBuf::from(std::env::var_os("DUST_INBOX_ROOT").unwrap());
+    let root = PathBuf::from(std::env::var_os("DUSTY_INBOX_ROOT").unwrap());
     assert_eq!(
         std::fs::read_to_string(root.join("untouched.txt")).unwrap(),
         "exact local source\n"
@@ -243,7 +243,7 @@ fn inbox_same_number_stale_read_drafts_scoped_write_files_and_saved_sections() {
     wait(&mut screen, |text| {
         text.contains("View saved locally: Review queue")
     });
-    let root = PathBuf::from(std::env::var_os("DUST_INBOX_ROOT").unwrap());
+    let root = PathBuf::from(std::env::var_os("DUSTY_INBOX_ROOT").unwrap());
     let config = git2::Repository::open(&root)
         .unwrap()
         .config()

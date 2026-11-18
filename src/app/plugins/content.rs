@@ -495,10 +495,10 @@ impl Plugins {
                 source: "builtin.health.virtual".into(),
                 document: 1,
                 key: "health".into(),
-                title: "Dust health".into(),
+                title: "Dusty health".into(),
                 language: "markdown".into(),
                 text: format!(
-                    "# Dust health\n\n- editor: ready\n- plugins indexed: {}\n- API commands: {commands}\n- persistence schema: {}\n",
+                    "# Dusty health\n\n- editor: ready\n- plugins indexed: {}\n- API commands: {commands}\n- persistence schema: {}\n",
                     self.manager.statuses.len(),
                     crate::persistence::STATE_VERSION
                 ),

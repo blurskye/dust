@@ -89,7 +89,7 @@ impl WorkspaceFileWorker {
         let worker = Arc::clone(&cancellation);
         let (sender, receiver) = mpsc::sync_channel(policy.event_queue_capacity);
         thread::Builder::new()
-            .name(format!("dust-workspace-files-{stream_id}"))
+            .name(format!("dusty-workspace-files-{stream_id}"))
             .spawn(move || run_workspace_files(stream_id, policy, worker, sender))
             .map_err(WorkspaceFileError::Spawn)?;
         self.cancel();

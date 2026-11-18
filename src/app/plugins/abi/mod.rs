@@ -15,7 +15,7 @@ use crate::editor::{
     CommandAccess, CommandAuthority, CommandInvocation, CommandOutcome, CommandValue,
     CommandWrapperAction, InvocationSource, PendingCommandId,
 };
-use crate::plugins::component::component_api::dust::plugin::host as wit;
+use crate::plugins::component::component_api::dusty::plugin::host as wit;
 use crate::plugins::requests::{EditorRequest, value_bytes};
 use crate::plugins::{
     PluginCapability, PluginDelivery, PluginExecutionRequest, PluginInvocationOrigin, PluginLoadId,

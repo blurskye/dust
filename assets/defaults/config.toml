@@ -126,7 +126,7 @@ zig = "//"
 zsh = "#"
 
 [ui]
-theme = "dust"
+theme = "dusty"
 color_mode = "auto"
 mouse = true
 
@@ -383,13 +383,13 @@ float = true
 close_on_exit = true
 
 # ACP agents for `<leader>a`. Each session runs in the worktree that was open when it
-# started. Every agent that supports MCP gets Dust's `agent` tool for subagents, which run
+# started. Every agent that supports MCP gets Dusty's `agent` tool for subagents, which run
 # as tabs of their own. The Claude, Codex and pi adapters can be installed from the tool manager
 # (`<leader>cm`, Agent); OpenCode and Gemini speak ACP themselves. `options` picks a model,
 # mode or thinking level at start, e.g. `options = { model = "…", thought_level = "high" }`.
 [agents]
 default = "claude"
-# "acp" talks to the agent in Dust's agent panel; "terminal" runs its own program (`cli`) in a
+# "acp" talks to the agent in Dusty's agent panel; "terminal" runs its own program (`cli`) in a
 # terminal beside the editor, where the panel opens, and it handles its own login, permissions
 # and history there.
 connection = "acp"
@@ -398,7 +398,7 @@ connection = "acp"
 panel_width = 35
 # "left" or "right": the side the agent panel or terminal agent opens on.
 side = "right"
-# Agents such as pi read MCP servers only from their own config, so Dust gives them its tools,
+# Agents such as pi read MCP servers only from their own config, so Dusty gives them its tools,
 # such as subagents, by running the profile's `add_tools` command before they start. It
 # changes that agent's config; with false each new session says what to run instead.
 add_tools = true
@@ -409,7 +409,7 @@ cli = ["claude"]
 arguments = []
 environment = {}
 options = {}
-# Over ACP, subagents come from Dust's `agent` tool, so Claude Code's own subagent tools are
+# Over ACP, subagents come from Dusty's `agent` tool, so Claude Code's own subagent tools are
 # off there (Task in older versions, Agent and Workflow in newer ones); the `claude` CLI in a
 # terminal keeps them.
 meta = { claudeCode = { options = { disallowedTools = ["Task", "Agent", "Workflow"] } } }
@@ -419,7 +419,7 @@ program = "codex-acp"
 cli = ["codex"]
 arguments = []
 environment = {}
-# Over ACP, subagents come from Dust's `agent` tool, so Codex's own multi-agent tools are off
+# Over ACP, subagents come from Dusty's `agent` tool, so Codex's own multi-agent tools are off
 # there; the `codex` CLI in a terminal keeps them.
 acp_environment = { CODEX_CONFIG = '{"features":{"multi_agent":false}}' }
 options = {}
@@ -433,14 +433,14 @@ arguments = []
 environment = { PI_HARDWARE_CURSOR = "1" }
 options = {}
 # pi reads MCP servers only from its own config; `mcp add` replaces an entry of the same name.
-add_tools = ["pi", "mcp", "add", "dust", "--exposure", "direct", "--", "{dust}", "--agent-tools"]
+add_tools = ["pi", "mcp", "add", "dusty", "--exposure", "direct", "--", "{dusty}", "--agent-tools"]
 
 [agents.profiles.opencode]
 program = "opencode"
 cli = ["opencode"]
 arguments = ["acp"]
 environment = {}
-# Over ACP, subagents come from Dust's `agent` tool, so OpenCode's own task tool is off there;
+# Over ACP, subagents come from Dusty's `agent` tool, so OpenCode's own task tool is off there;
 # `opencode` in a terminal keeps it.
 acp_environment = { OPENCODE_CONFIG_CONTENT = '{"tools":{"task":false}}' }
 options = {}
@@ -703,7 +703,7 @@ config_reload_queued = "configuration reload queued"
 unknown_config_key = "unknown configuration key `{key}`"
 no_keymap_binding = "no resolved binding in context `{context}`"
 no_keymap_conflicts = "no keymap conflicts"
-healthy = "Dust health — {buffers} buffers · {jobs} jobs · {ptys} PTYs · {preflights} preflights · {tasks} tasks · {plugins} plugins/{plugin_failures} failed · {packages} package ops · {lsp} LSP · DAP {dap} · persistence {persistence} · safe {safe} · workspace {workspace} · terminal {terminal}"
+healthy = "Dusty health — {buffers} buffers · {jobs} jobs · {ptys} PTYs · {preflights} preflights · {tasks} tasks · {plugins} plugins/{plugin_failures} failed · {packages} package ops · {lsp} LSP · DAP {dap} · persistence {persistence} · safe {safe} · workspace {workspace} · terminal {terminal}"
 safe_mode_status = "safe mode: {state}"
 safe_mode_blocked = "safe mode blocks project execution, plugins, and session restore"
 no_previous_change = "no previous change"
@@ -753,7 +753,7 @@ tool_no_matches = "No matching tools · Esc clears the search · Tab changes cat
 tool_install_started = "installing {tool}…"
 tool_install_succeeded = "installed {tool}"
 tool_install_failed = "failed to install {tool}: {diagnostic}"
-tool_no_installer = "{tool} has no portable bundled installer; Dust will not invoke a system package manager"
+tool_no_installer = "{tool} has no portable bundled installer; Dusty will not invoke a system package manager"
 lsp_stopped = "language server {server} stopped"
 lsp_install_hint = "{server} can serve {language} files: install it with Space c m"
 lsp_failed = "language server {server} failed: {diagnostic}"
@@ -865,7 +865,7 @@ package_plugin_conflict = "package plugin `{plugin}` conflicts with an already c
 plugin_disabled = "disabled plugin {id}"
 plugin_load_failed = "plugin {id} failed to queue: {diagnostic}"
 plugin_worker_stopped = "Plugin worker stopped; runtime commands were disabled: {diagnostic}"
-previous_crash = "Dust recovered terminal control after a previous crash; use :crashinspect"
+previous_crash = "Dusty recovered terminal control after a previous crash; use :crashinspect"
 crash_location = "previous crash metadata: {path}"
 crash_cleared = "previous crash metadata cleared"
 terminal_unknown = "unknown terminal profile {profile}"
@@ -996,12 +996,12 @@ hidden = [
 
 [command_palette.categories]
 agent = "Agent"
-application = "Dust"
+application = "Dusty"
 buffer = "Buffer"
 command_palette = "Commands"
 config = "Settings"
 settings = "Settings"
-crash = "Dust"
+crash = "Dusty"
 dap = "Debug"
 diagnostic = "Diagnostics"
 editor = "Editor"
@@ -1112,7 +1112,7 @@ workspace = "Project"
 "edit.surround" = "Delete or replace surrounding pair"
 "edit.toggle_case" = "Toggle character case"
 "view.selection.swap" = "Other end of selection"
-"editor.quit" = "Quit Dust"
+"editor.quit" = "Quit Dusty"
 "file.new" = "New buffer"
 "file.open" = "Open file by path"
 "file.reload" = "Reload file"

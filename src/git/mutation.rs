@@ -296,7 +296,7 @@ impl GitMutationWorker {
         let worker = Arc::clone(&cancel);
         let (tx, rx) = mpsc::sync_channel(1);
         thread::Builder::new()
-            .name(format!("dust-git-mutation-{}", request_id.0))
+            .name(format!("dusty-git-mutation-{}", request_id.0))
             .spawn(move || {
                 let result = match request {
                     GitMutationRequest::StageHunk(request) => {

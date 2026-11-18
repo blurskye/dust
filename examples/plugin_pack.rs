@@ -64,7 +64,7 @@ fn pack(
         .module(&fs::read(core)?)?
         .validate(true)
         .encode()?;
-    let mut manifest: dust::plugins::PluginManifest =
+    let mut manifest: dusty::plugins::PluginManifest =
         toml::from_str(&fs::read_to_string(manifest)?)?;
     manifest.component_sha256 = format!("{:x}", Sha256::digest(&component));
     if let Some(parent) = output.parent().filter(|path| !path.as_os_str().is_empty()) {
@@ -95,7 +95,7 @@ mod tests {
         )
         .unwrap();
         let bytes = fs::read(output.join("guest.wasm")).unwrap();
-        let manifest: dust::plugins::PluginManifest =
+        let manifest: dusty::plugins::PluginManifest =
             toml::from_str(&fs::read_to_string(output.join("manifest.toml")).unwrap()).unwrap();
         assert_eq!(
             manifest.component_sha256,

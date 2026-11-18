@@ -6,7 +6,7 @@ fn migration_reads_regular_files_within_the_limit() {
     let path = root.path().join("config.toml");
     std::fs::write(&path, "[editor]\ntab_width = 4\n").unwrap();
     let migrate = || {
-        std::process::Command::new(env!("CARGO_BIN_EXE_dust"))
+        std::process::Command::new(env!("CARGO_BIN_EXE_dusty"))
             .arg("--migrate-config")
             .arg(&path)
             .output()
@@ -52,7 +52,7 @@ fn migration_rejects_special_files() {
         std::path::Path::new("/dev/zero"),
         root.path(),
     ] {
-        let output = std::process::Command::new(env!("CARGO_BIN_EXE_dust"))
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_dusty"))
             .arg("--migrate-config")
             .arg(path)
             .output()
@@ -75,7 +75,7 @@ fn startup_errors_escape_filesystem_terminal_controls() {
     let root = tempfile::tempdir().unwrap();
     let fifo = root.path().join("pipe\x1b]0;untrusted\x07");
     mkfifo(&fifo, Mode::S_IRUSR | Mode::S_IWUSR).unwrap();
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_dust"))
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_dusty"))
         .args(["--clean", "--print-startup"])
         .arg(fifo)
         .output()

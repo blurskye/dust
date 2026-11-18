@@ -113,7 +113,7 @@ impl GitScreen {
                 }
             })
             .collect::<String>();
-        let temporary = format!("refs/heads/dust-worktree/{name}");
+        let temporary = format!("refs/heads/dusty-worktree/{name}");
         if !git2::Reference::is_valid_name(&temporary) {
             return Err("Choose a worktree directory name valid for Git".into());
         }

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Verify the exact Bun bootstrap artifact against the ordinary glibc Linux
-# distributions Dust supports. This is an opt-in release qualification: it needs
+# distributions Dusty supports. This is an opt-in release qualification: it needs
 # Podman plus network access to fetch the pinned ZIP and the three base images.
 set -euo pipefail
 
@@ -34,7 +34,7 @@ chmod 755 "$bun"
 
 for image in docker.io/library/debian:12 docker.io/library/ubuntu:24.04 quay.io/fedora/fedora:42; do
     printf 'qualifying %s: ' "$image"
-    podman run --rm --network=none -v "$bun:/opt/dust/bun:ro" "$image" /opt/dust/bun --version |
+    podman run --rm --network=none -v "$bun:/opt/dusty/bun:ro" "$image" /opt/dusty/bun --version |
         grep -Fx "$version"
 done
 

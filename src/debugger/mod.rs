@@ -227,7 +227,7 @@ fn set_breakpoints_arguments(
     json!({"source":{"path":path},"breakpoints":breakpoints.into_iter().take(10_000).map(|item|json!({"line":item.line,"column":item.column,"condition":item.condition,"hitCondition":item.hit_condition,"logMessage":item.log_message})).collect::<Vec<_>>()})
 }
 
-/// The argument that makes the Dust binary start a program in a session of its own.
+/// The argument that makes the Dusty binary start a program in a session of its own.
 pub const ADAPTER_SESSION_ARGUMENT: &str = "--adapter-session";
 pub const ADAPTER_BRIDGE_ARGUMENT: &str = "--adapter-bridge";
 /// In a catalog entry's `launch_args`, where the socket address of a bridged adapter goes.
@@ -236,8 +236,8 @@ const ADAPTER_ADDRESS: &str = "{address}";
 const ADAPTER_PORT: &str = "{port}";
 /// In a bridged adapter's environment, asks for the adapter to run in a terminal, so the program
 /// it launches reads and writes that terminal. VS Code runs Delve the same way.
-pub(crate) const ADAPTER_IN_TERMINAL: &str = "DUST_ADAPTER_IN_TERMINAL";
-/// How long an adapter gets to answer `initialize` before Dust says it is not working.
+pub(crate) const ADAPTER_IN_TERMINAL: &str = "DUSTY_ADAPTER_IN_TERMINAL";
+/// How long an adapter gets to answer `initialize` before Dusty says it is not working.
 const ADAPTER_ANSWER_TIMEOUT: Duration = Duration::from_secs(15);
 /// How long a stopping adapter gets to end its program and clean up before it is killed.
 const ADAPTER_EXIT_GRACE: Duration = Duration::from_secs(2);
@@ -254,7 +254,7 @@ pub fn use_adapter_session_launcher(binary: PathBuf) {
 /// cannot make its program the foreground group of /dev/tty, which would leave the editor unable
 /// to read keys. Only returns if it failed.
 /// Delve and CodeLLDB speak DAP only over a socket. Give them one and carry it over this
-/// process's stdin and stdout, so the rest of Dust has one way to talk to an adapter.
+/// process's stdin and stdout, so the rest of Dusty has one way to talk to an adapter.
 #[cfg(unix)]
 pub fn bridge_adapter_socket(
     program: &std::ffi::OsStr,
@@ -330,8 +330,8 @@ pub fn bridge_adapter_socket(
     }
     Ok(())
 }
-/// Ask Dust to run the adapter in a terminal, holding on to what Dust sends meanwhile, which is
-/// for the adapter. False when Dust refused, and the adapter then runs without one.
+/// Ask Dusty to run the adapter in a terminal, holding on to what Dusty sends meanwhile, which is
+/// for the adapter. False when Dusty refused, and the adapter then runs without one.
 #[cfg(unix)]
 fn adapter_opened_in_terminal(
     program: &std::ffi::OsStr,
@@ -646,7 +646,7 @@ fn run_adapter(
     let stderr_events = events.clone();
     let stderr = child.stderr.take().and_then(|mut stderr| {
         thread::Builder::new()
-            .name("dust-dap-stderr".into())
+            .name("dusty-dap-stderr".into())
             .spawn(move || {
                 #[cfg(unix)]
                 {
@@ -703,7 +703,7 @@ fn run_adapter(
         sequence,
         "initialize",
         json!({
-            "clientID":"dust", "clientName":"Dust", "adapterID":adapter,
+            "clientID":"dusty", "clientName":"Dusty", "adapterID":adapter,
             "pathFormat":"path", "linesStartAt1":true, "columnsStartAt1":true,
             "supportsVariablePaging":true, "supportsVariableType":true, "supportsRunInTerminalRequest":true,
             "supportsStartDebuggingRequest":server_address.is_some()
@@ -1305,7 +1305,7 @@ fn run_adapter(
                             sequence,
                             "initialize",
                             json!({
-                                "clientID":"dust", "clientName":"Dust", "adapterID":adapter,
+                                "clientID":"dusty", "clientName":"Dusty", "adapterID":adapter,
                                 "pathFormat":"path", "linesStartAt1":true, "columnsStartAt1":true,
                                 "supportsVariablePaging":true, "supportsVariableType":true,
                                 "supportsRunInTerminalRequest":true, "supportsStartDebuggingRequest":true
@@ -1781,7 +1781,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn an_adapter_that_cannot_start_is_passed_over() {
-        let missing = std::env::temp_dir().join("dust-no-such-adapter.exe");
+        let missing = std::env::temp_dir().join("dusty-no-such-adapter.exe");
         assert!(!crate::debugger::adapter_starts(&missing));
         assert!(crate::debugger::adapter_starts(
             &std::env::current_exe().unwrap()

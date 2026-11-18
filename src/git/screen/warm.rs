@@ -24,7 +24,7 @@ const HISTORY_LINES: usize = 200;
 pub(super) const REVISION: u64 = u64::MAX;
 
 /// Keeps each repository's last status, History head and branches in
-/// `$XDG_CACHE_HOME/dusty/git` (the `dust` and `dusty-git` binaries call it).
+/// `$XDG_CACHE_HOME/dusty/git` (the `dusty` and `dusty-git` binaries call it).
 pub fn enable() {
     ENABLED.store(true, Ordering::Relaxed);
 }
@@ -196,7 +196,7 @@ impl GitScreen {
             remotes: self.remotes.clone(),
         };
         let _ = std::thread::Builder::new()
-            .name("dust-git-warm".into())
+            .name("dusty-git-warm".into())
             .spawn(move || {
                 let Ok(repository) = git2::Repository::open(&root) else {
                     return;

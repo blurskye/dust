@@ -602,7 +602,7 @@ impl ComponentDeadline {
         let (cancel, receiver) = std::sync::mpsc::channel();
         let duration = Duration::from_millis(ticks.max(1).saturating_mul(10));
         let worker = thread::Builder::new()
-            .name("dust-plugin-deadline".into())
+            .name("dusty-plugin-deadline".into())
             .spawn(move || {
                 if matches!(
                     receiver.recv_timeout(duration),
@@ -845,7 +845,7 @@ pub(crate) fn execute_component(
             state.ui_events.clear();
             state.pending_ui_tokens.clear();
         }
-        state.snapshot = snapshot.map(|snapshot| component_api::dust::plugin::host::Snapshot {
+        state.snapshot = snapshot.map(|snapshot| component_api::dusty::plugin::host::Snapshot {
             buffer: snapshot.buffer,
             revision: snapshot.revision,
             utf8: snapshot.utf8,
@@ -856,14 +856,14 @@ pub(crate) fn execute_component(
         state.confirmation_result_only = !confirmation_results.is_empty();
         state.execution_available = true;
         state.ui_events.extend(ui_events.into_iter().map(|event| {
-            component_api::dust::plugin::host::UiEvent {
+            component_api::dusty::plugin::host::UiEvent {
                 token: event.token,
                 handle: event.handle,
                 graph_revision: event.graph_revision,
                 tree_revision: event.tree_revision,
                 surface_revision: event.surface_revision,
                 geometry: event.geometry.map(|geometry| {
-                    component_api::dust::plugin::host::SurfaceGeometry {
+                    component_api::dusty::plugin::host::SurfaceGeometry {
                         handle: geometry.handle,
                         width: geometry.width,
                         height: geometry.height,
@@ -897,21 +897,21 @@ pub(crate) fn execute_component(
         state.host_events = host_events
             .into_iter()
             .take(64)
-            .map(|event| component_api::dust::plugin::host::HostEvent {
+            .map(|event| component_api::dusty::plugin::host::HostEvent {
                 id: event.id,
                 sequence: event.sequence,
                 kind: match event.kind {
                     PluginSubscriptionKind::WorkspaceMetadataChanged => {
-                        component_api::dust::plugin::host::HostEventKind::WorkspaceMetadataChanged
+                        component_api::dusty::plugin::host::HostEventKind::WorkspaceMetadataChanged
                     }
                     PluginSubscriptionKind::ActiveSurfaceChanged => {
-                        component_api::dust::plugin::host::HostEventKind::ActiveSurfaceChanged
+                        component_api::dusty::plugin::host::HostEventKind::ActiveSurfaceChanged
                     }
                     PluginSubscriptionKind::BufferSummaryChanged => {
-                        component_api::dust::plugin::host::HostEventKind::BufferSummaryChanged
+                        component_api::dusty::plugin::host::HostEventKind::BufferSummaryChanged
                     }
                     PluginSubscriptionKind::PluginSurfaceChanged => {
-                        component_api::dust::plugin::host::HostEventKind::PluginSurfaceChanged
+                        component_api::dusty::plugin::host::HostEventKind::PluginSurfaceChanged
                     }
                 },
                 revision: event.revision,

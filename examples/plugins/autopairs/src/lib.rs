@@ -1,7 +1,7 @@
 //! Pair insertion, skipping and deletion as wrappers around ordinary typing.
 // SPDX-License-Identifier: Apache-2.0
 wit_bindgen::generate!({ path: "../../../wit", world: "editor-plugin" });
-use dust::plugin::host;
+use dusty::plugin::host;
 
 struct Pairs;
 fn field<'a>(value: &'a host::CommandValue, name: &str) -> Option<&'a host::ValueNode> {

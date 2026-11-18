@@ -644,7 +644,7 @@ pub fn abort_operation(repository: &Path) -> Result<GitRecoveryOutcome, GitRecov
         .find_reference("HEAD")
         .and_then(|reference| reference.resolve())
         .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
-    head.set_target(recorded, "dust: abort the paused operation")
+    head.set_target(recorded, "dusty: abort the paused operation")
         .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
     let mut index = repo
         .index()

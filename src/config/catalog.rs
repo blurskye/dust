@@ -51,7 +51,7 @@ pub struct SettingInfo {
     /// The first choice, which leaves the setting empty, such as "Ask every time".
     #[serde(default)]
     pub empty: Option<String>,
-    /// The change applies the next time Dust starts.
+    /// The change applies the next time Dusty starts.
     #[serde(default)]
     pub restart: bool,
 }
@@ -110,7 +110,7 @@ pub fn settings_catalog() -> &'static SettingsCatalog {
     PARSED.get_or_init(|| toml::from_str(CATALOG).expect("the settings catalog must parse"))
 }
 
-/// The questions Dust asks on first start, from `assets/defaults/setup.toml`.
+/// The questions Dusty asks on first start, from `assets/defaults/setup.toml`.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SetupCatalog {

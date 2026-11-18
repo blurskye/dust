@@ -407,7 +407,7 @@ impl GitStatusWorker {
         let (tx, rx) = mpsc::sync_channel(1);
         self.worker = Some(
             thread::Builder::new()
-                .name(format!("dust-git-status-{}", request_id.0))
+                .name(format!("dusty-git-status-{}", request_id.0))
                 .spawn(move || {
                     let result = read_status(request_id, &policy, &unsaved, &worker);
                     let _ = tx.send(Event::Complete(result));
@@ -985,7 +985,7 @@ mod tests {
     #[test]
     fn status_commands_enforce_deadlines_and_drain_cancelled_processes() {
         let dir = tempfile::tempdir().unwrap();
-        let arguments = ["-c", "alias.dust-stall=!sleep 30", "dust-stall"];
+        let arguments = ["-c", "alias.dusty-stall=!sleep 30", "dusty-stall"];
         let mut policy = policy(dir.path());
         policy.deadline = Duration::from_millis(100);
         let started = Instant::now();

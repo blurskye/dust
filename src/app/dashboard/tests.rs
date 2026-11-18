@@ -137,10 +137,10 @@ fn projects_leave_out_tutor_folders_missing_folders_and_symlinked_duplicates() {
     std::fs::create_dir(&gone).unwrap();
     std::os::unix::fs::symlink(&tally, &proj).unwrap();
     let practice = tempfile::Builder::new()
-        .prefix("dust-tutor-")
+        .prefix("dusty-tutor-")
         .tempdir()
         .unwrap();
-    // Open each as the workspace so Dust remembers it, ending in the symlink to tally.
+    // Open each as the workspace so Dusty remembers it, ending in the symlink to tally.
     for root in [
         tally.clone(),
         practice.path().to_path_buf(),
@@ -177,7 +177,7 @@ fn tutor_files_are_not_recent_and_deleted_files_leave_the_dashboard() {
     let (_app_dirs, mut app) = app();
     let root = app.state.workspace_root.clone();
     let practice = tempfile::Builder::new()
-        .prefix("dust-tutor-")
+        .prefix("dusty-tutor-")
         .tempdir()
         .unwrap();
     let lesson = practice.path().join("practice.rs");

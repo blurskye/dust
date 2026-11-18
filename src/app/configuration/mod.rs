@@ -175,7 +175,7 @@ impl Configuration {
     pub(in crate::app) fn settings(&self) -> &crate::config::Config {
         &self.accepted.settings
     }
-    /// The config.toml the Settings page writes, or `None` when Dust runs on the bundled
+    /// The config.toml the Settings page writes, or `None` when Dusty runs on the bundled
     /// defaults only.
     pub(in crate::app) fn user_settings_path(&self) -> Option<PathBuf> {
         self.user_configuration

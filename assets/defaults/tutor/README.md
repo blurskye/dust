@@ -1,6 +1,6 @@
 # Practice project
 
-A small project for the Dust tutor. It is thrown away when the tutor ends.
+A small project for the Dusty tutor. It is thrown away when the tutor ends.
 
 ## What's here
 

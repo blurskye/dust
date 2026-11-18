@@ -5,7 +5,7 @@ mod linter;
 mod output;
 mod sources;
 
-/// Limits for every task and tool process Dust runs.
+/// Limits for every task and tool process Dusty runs.
 pub(in crate::app) const PROCESS_EVENT_CAPACITY: usize = 256;
 const MAXIMUM_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
 const MAXIMUM_LINE_BYTES: usize = 1024 * 1024;
@@ -525,7 +525,7 @@ impl Tasks {
                 |formatter| formatter.arguments.clone(),
             ),
             cwd: result.cwd,
-            // A task runs with what the user's shell gave Dust, as a terminal does, and its own
+            // A task runs with what the user's shell gave Dusty, as a terminal does, and its own
             // settings win.
             environment: std::env::vars_os()
                 .filter_map(|(key, value)| Some((key.into_string().ok()?, value)))

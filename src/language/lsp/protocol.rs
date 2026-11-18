@@ -87,15 +87,15 @@ use crate::language::lsp::paths::file_uri;
 use crate::language::lsp::session::PendingRequest;
 
 /// `tags` is in `resolveSupport` because rust-analyzer only advertises resolve, and with it
-/// auto-imports, when the client defers a field it recognises. Dust doesn't read tags.
-/// Pull diagnostics are not advertised: Dust only pulls on an explicit command, and servers such
+/// auto-imports, when the client defers a field it recognises. Dusty doesn't read tags.
+/// Pull diagnostics are not advertised: Dusty only pulls on an explicit command, and servers such
 /// as rust-analyzer stop pushing their own diagnostics to a client that says it pulls.
 pub(super) fn initialize_message(root: &Path, initialization_options: Option<&Value>) -> Value {
     let mut message = json!({
         "jsonrpc":"2.0", "id":1, "method":"initialize",
         "params":{
             "processId":std::process::id(),
-            "clientInfo":{"name":"dust","version":env!("CARGO_PKG_VERSION")},
+            "clientInfo":{"name":"dusty","version":env!("CARGO_PKG_VERSION")},
             "rootUri":file_uri(root),
             "workspaceFolders":[{"uri":file_uri(root),"name":root.file_name().and_then(|v|v.to_str()).unwrap_or("workspace")}],
             "capabilities":{

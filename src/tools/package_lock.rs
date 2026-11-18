@@ -258,7 +258,7 @@ pub fn verify_lock_store(
         .truncate(false)
         .read(true)
         .write(true)
-        .open(parent.join("dust-packages.lock"))
+        .open(parent.join("dusty-packages.lock"))
         .map_err(PackageError::Io)?;
     let _transaction = crate::files::lock_exclusive(transaction, false)
         .map_err(|(_, error)| PackageError::Io(error))?;

@@ -102,7 +102,7 @@ pub(super) struct Terminals {
     input_hint_seen: bool,
     input_hint_until: Option<std::time::Instant>,
     closed: bool,
-    /// Set for every terminal under the profile's own variables, such as `DUST_SERVER`.
+    /// Set for every terminal under the profile's own variables, such as `DUSTY_SERVER`.
     environment: BTreeMap<String, String>,
 }
 impl Terminals {

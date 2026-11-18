@@ -1,80 +1,80 @@
 // SPDX-License-Identifier: Apache-2.0
 wit_bindgen::generate!({ path: "wit", world: "editor-plugin" });
 
-use dust::plugin::host;
+use dusty::plugin::host;
 mod surface;
 
-use dust::plugin::host::CheckedWindowRequest;
+use dusty::plugin::host::CheckedWindowRequest;
 
-use dust::plugin::host::ConfirmationAnswer;
+use dusty::plugin::host::ConfirmationAnswer;
 
-use dust::plugin::host::ConfirmationOutcome;
+use dusty::plugin::host::ConfirmationOutcome;
 
-use dust::plugin::host::ConfirmationRequest;
+use dusty::plugin::host::ConfirmationRequest;
 
-use dust::plugin::host::OpenWindowRequest;
+use dusty::plugin::host::OpenWindowRequest;
 
-use dust::plugin::host::PatchPrivateRequest;
+use dusty::plugin::host::PatchPrivateRequest;
 
-use dust::plugin::host::PlaceWindowRequest;
+use dusty::plugin::host::PlaceWindowRequest;
 
-use dust::plugin::host::PrivateCell;
+use dusty::plugin::host::PrivateCell;
 
-use dust::plugin::host::PrivateCursor;
+use dusty::plugin::host::PrivateCursor;
 
-use dust::plugin::host::PrivateHitRegion;
+use dusty::plugin::host::PrivateHitRegion;
 
-use dust::plugin::host::PrivatePatch;
+use dusty::plugin::host::PrivatePatch;
 
-use dust::plugin::host::PrivateRect;
+use dusty::plugin::host::PrivateRect;
 
-use dust::plugin::host::PrivateSnapshot;
+use dusty::plugin::host::PrivateSnapshot;
 
-use dust::plugin::host::PickerProviderChunk;
+use dusty::plugin::host::PickerProviderChunk;
 
-use dust::plugin::host::PickerProviderItem;
+use dusty::plugin::host::PickerProviderItem;
 
-use dust::plugin::host::PrivateStyle;
+use dusty::plugin::host::PrivateStyle;
 
-use dust::plugin::host::ProviderTerminal;
+use dusty::plugin::host::ProviderTerminal;
 
-use dust::plugin::host::ProviderTerminalKind;
+use dusty::plugin::host::ProviderTerminalKind;
 
-use dust::plugin::host::ReplacePrivateRequest;
+use dusty::plugin::host::ReplacePrivateRequest;
 
-use dust::plugin::host::ReplaceUiRequest;
+use dusty::plugin::host::ReplaceUiRequest;
 
-use dust::plugin::host::StorageCasRequest;
+use dusty::plugin::host::StorageCasRequest;
 
-use dust::plugin::host::StorageDeleteRequest;
+use dusty::plugin::host::StorageDeleteRequest;
 
-use dust::plugin::host::StorageListRequest;
+use dusty::plugin::host::StorageListRequest;
 
-use dust::plugin::host::StorageRequest;
+use dusty::plugin::host::StorageRequest;
 
-use dust::plugin::host::UiNode;
+use dusty::plugin::host::UiNode;
 
-use dust::plugin::host::UiNodeKind;
+use dusty::plugin::host::UiNodeKind;
 
-use dust::plugin::host::UiRequest;
+use dusty::plugin::host::UiRequest;
 
-use dust::plugin::host::UiStyle;
+use dusty::plugin::host::UiStyle;
 
-use dust::plugin::host::UiTree;
+use dusty::plugin::host::UiTree;
 
-use dust::plugin::host::VirtualDocumentFull;
+use dusty::plugin::host::VirtualDocumentFull;
 
-use dust::plugin::host::VirtualDocumentPatch;
+use dusty::plugin::host::VirtualDocumentPatch;
 
-use dust::plugin::host::VirtualDocumentPatchSet;
+use dusty::plugin::host::VirtualDocumentPatchSet;
 
-use dust::plugin::host::VirtualDocumentProposal;
+use dusty::plugin::host::VirtualDocumentProposal;
 
-use dust::plugin::host::VirtualDocumentProposalKind;
+use dusty::plugin::host::VirtualDocumentProposalKind;
 
-use dust::plugin::host::VirtualDocumentRequestKind;
+use dusty::plugin::host::VirtualDocumentRequestKind;
 
-use dust::plugin::host::WindowPlacement;
+use dusty::plugin::host::WindowPlacement;
 use std::sync::atomic::AtomicU8;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
@@ -781,9 +781,9 @@ fn drive_abi(action: &str, call: &host::CommandCall) -> Result<String, String> {
         "system-process" | "system-sleep" | "system-process-escape" => {
             let process = host::start_process(&host::ProcessStart {
                 program: "sh".into(),
-                arguments: vec!["-c".into(), if action == "system-sleep" { "sleep 60" } else { "printf ready; IFS= read -r line; printf '%s' \"$line\"; printf '%s' \"$DUST_SYSTEM_TEST\" >&2; cat; exit 7" }.into()],
+                arguments: vec!["-c".into(), if action == "system-sleep" { "sleep 60" } else { "printf ready; IFS= read -r line; printf '%s' \"$line\"; printf '%s' \"$DUSTY_SYSTEM_TEST\" >&2; cat; exit 7" }.into()],
                 cwd: if action == "system-process-escape" { ".." } else { "." }.into(),
-                environment: vec![("DUST_SYSTEM_TEST".into(), "environment".into())],
+                environment: vec![("DUSTY_SYSTEM_TEST".into(), "environment".into())],
                 stdin: Some(b"initial\n".to_vec()), handler: "drive".into(),
             })?;
             SYSTEM_PROCESS.store(process, Ordering::SeqCst);

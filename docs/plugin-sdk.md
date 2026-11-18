@@ -1,7 +1,7 @@
-# Dust Component Plugin SDK 0.4
+# Dusty Component Plugin SDK 0.4
 
-The production contract is [`wit/dust-plugin.wit`](../wit/dust-plugin.wit),
-package **`dust:plugin@0.4.0`**, world `editor-plugin`, shipped with Dust 0.3.1.
+The production contract is [`wit/dusty-plugin.wit`](../wit/dusty-plugin.wit),
+package **`dusty:plugin@0.4.0`**, world `editor-plugin`, shipped with Dusty 0.4.0.
 Build plugins against this WIT; the plugin ABI version is separate from the editor
 release version. Plugins are Wasm Components, not native libraries, WASI programs,
 or subprocesses.
@@ -15,7 +15,7 @@ the same WIT. No published SDK crate is required.
 ## Start a Rust plugin
 
 ```sh
-dust plugin new mywords
+dusty plugin new mywords
 cd mywords
 cargo build --locked --release --target wasm32-unknown-unknown
 ```
@@ -25,7 +25,7 @@ shell. The scaffold includes the production WIT, pinned Cargo lockfile, manifest
 and a working buffer-word completion source copied from the maintained example.
 Names use lowercase letters and digits, start with a letter, and are at most 64
 characters. An existing destination is never overwritten. To edit a file actually
-named `plugin`, use `dust -- plugin`.
+named `plugin`, use `dusty -- plugin`.
 
 Follow the generated README to encode the core module with the checkout's
 `plugin_pack` example and load the component. The packer accepts either an output
@@ -79,7 +79,7 @@ Argument kinds are `string`, `boolean`, `integer`, `number`, `list`, and `record
 The public command ID is `plugin.<owner>.<local-command>`. User keymaps override
 plugin defaults, which override bundled defaults.
 
-Dust validates declarations before loading component bytes, checks the digest and
+Dusty validates declarations before loading component bytes, checks the digest and
 store path, then instantiates the component on its worker without WASI imports.
 `activate() -> result<list<string>, string>` returns declared local handler names.
 `execute-command(command, call) -> result<string, string>` invokes one of those
@@ -329,7 +329,7 @@ From the repository root, enter the guest shell, which supplies the Wasm target:
 nix develop .#guest
 cd tests/fixtures/retained-guest
 cargo build --locked --release --target wasm32-unknown-unknown --target-dir target
-cp target/wasm32-unknown-unknown/release/dust_retained_guest.wasm retained-guest.core.wasm
+cp target/wasm32-unknown-unknown/release/dusty_retained_guest.wasm retained-guest.core.wasm
 ```
 
 After changing WIT, rebuild every fixture and copy the production WIT into its guest
@@ -399,7 +399,7 @@ Declare `process` in manifest capabilities. `start-process` accepts a program,
 argument vector, workspace-relative (or absolute in-workspace) cwd, environment
 additions, optional initial stdin bytes, and a handler. Programs are not implicitly
 shell commands: pass `sh` and `-c` explicitly if needed. Environment additions win
-over Dust's inherited environment. A trusted workspace is also required.
+over Dusty's inherited environment. A trusted workspace is also required.
 
 The start ID identifies the process. Output events contain raw stdout/stderr byte
 chunks, including output without newlines, followed by an exit code (`none` when

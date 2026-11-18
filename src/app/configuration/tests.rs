@@ -351,7 +351,7 @@ pub(in crate::app) fn theme_picker_previews_cancels_applies_and_never_overwrites
             .unwrap()
             .rows
             .iter()
-            .filter(|row| row.label == "Dust")
+            .filter(|row| row.label == "Dusty")
             .count(),
         1
     );
@@ -359,7 +359,7 @@ pub(in crate::app) fn theme_picker_previews_cancels_applies_and_never_overwrites
     app.reconcile_editor_windows();
     let rect = app.ui.surface_content.picker.as_ref().unwrap().outer;
     assert_eq!((rect.width, rect.height), (64, 12));
-    app.handle_configured_key("down".parse().unwrap()); // wrap from installed amber to current Dust
+    app.handle_configured_key("down".parse().unwrap()); // wrap from installed amber to current Dusty
     assert_eq!(app.configuration.theme(), &original_theme);
     app.handle_configured_key("up".parse().unwrap()); // wrap back to installed amber
     assert_eq!(app.configuration.theme(), &amber);
@@ -567,7 +567,7 @@ pub(in crate::app) fn resolved_explain_reports_exact_layered_and_replacement_pro
         env!("CARGO_MANIFEST_DIR"),
         "/assets/defaults/dashboard.toml"
     ))
-    .replace("identity = \"dust\"", "identity = \"PROVENANCE DASH\"");
+    .replace("identity = \"dusty\"", "identity = \"PROVENANCE DASH\"");
     loaded.dashboard = toml::from_str(&dashboard_source).expect("dashboard");
     loaded.dashboard_path = dashboard_path.clone();
     loaded.dashboard_spans = crate::config::setting_spans(&dashboard_source);
@@ -575,9 +575,9 @@ pub(in crate::app) fn resolved_explain_reports_exact_layered_and_replacement_pro
     let theme_path = root.path().join("provenance.toml");
     let theme_source = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/assets/themes/dust.toml"
+        "/assets/themes/dusty.toml"
     ))
-    .replace("name = \"dust\"", "name = \"provenance\"");
+    .replace("name = \"dusty\"", "name = \"provenance\"");
     loaded.theme = toml::from_str(&theme_source).expect("theme");
     loaded.theme_path = theme_path.clone();
     loaded.theme_spans = crate::config::setting_spans(&theme_source);
@@ -1625,17 +1625,17 @@ pub(in crate::app) fn documented_git_and_debugger_keys_match_the_keymap() {
 }
 
 #[test]
-pub(in crate::app) fn the_pi_profile_adds_dust_tools_to_pi() {
+pub(in crate::app) fn the_pi_profile_adds_dusty_tools_to_pi() {
     let (_app_dirs, app) = app();
     let agents = &app.configuration.settings().agents;
     assert!(agents.add_tools);
     assert_eq!(
         agents.profiles["pi"].add_tools.join(" "),
-        "pi mcp add dust --exposure direct -- {dust} --agent-tools"
+        "pi mcp add dusty --exposure direct -- {dusty} --agent-tools"
     );
     assert!(
         agents.profiles["claude"].add_tools.is_empty(),
-        "Dust gives other agents the tool itself"
+        "Dusty gives other agents the tool itself"
     );
 }
 
@@ -1687,13 +1687,13 @@ pub(in crate::app) fn the_agent_panel_opens_over_the_dashboard() {
 #[test]
 pub(in crate::app) fn asking_an_agent_whose_adapter_is_missing_says_how_to_install_it() {
     // Isolate discovery without changing the environment of parallel tests.
-    if std::env::var_os("DUST_TEST_MISSING_ADAPTER").is_none() {
+    if std::env::var_os("DUSTY_TEST_MISSING_ADAPTER").is_none() {
         let root = tempdir().unwrap();
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", "app::configuration::tests::asking_an_agent_whose_adapter_is_missing_says_how_to_install_it", "--nocapture"])
-            .env("DUST_TEST_MISSING_ADAPTER", "1")
-            .env("DUST_STATE_HOME", root.path().join("state"))
-            .env("DUST_CONFIG_HOME", root.path().join("config"))
+            .env("DUSTY_TEST_MISSING_ADAPTER", "1")
+            .env("DUSTY_STATE_HOME", root.path().join("state"))
+            .env("DUSTY_CONFIG_HOME", root.path().join("config"))
             .env("PATH", "")
             .output().unwrap();
         assert!(
@@ -1838,7 +1838,7 @@ pub(in crate::app) fn the_settings_page_saves_and_reloads_user_configuration() {
     use crate::ui::SettingsValue;
     // The worker resolves the user configuration from the environment, so use a child
     // process rather than changing those paths underneath other tests.
-    if std::env::var_os("DUST_TEST_SETTINGS_SAVE").is_none() {
+    if std::env::var_os("DUSTY_TEST_SETTINGS_SAVE").is_none() {
         let root = tempdir().unwrap();
         fs::write(
             root.path().join("config.toml"),
@@ -1851,9 +1851,9 @@ pub(in crate::app) fn the_settings_page_saves_and_reloads_user_configuration() {
                 "app::configuration::tests::the_settings_page_saves_and_reloads_user_configuration",
                 "--nocapture",
             ])
-            .env("DUST_TEST_SETTINGS_SAVE", "1")
-            .env("DUST_CONFIG_HOME", root.path())
-            .env("DUST_STATE_HOME", root.path().join("state"))
+            .env("DUSTY_TEST_SETTINGS_SAVE", "1")
+            .env("DUSTY_CONFIG_HOME", root.path())
+            .env("DUSTY_STATE_HOME", root.path().join("state"))
             .output()
             .unwrap();
         assert!(
@@ -1931,13 +1931,13 @@ pub(in crate::app) fn the_settings_page_saves_and_reloads_user_configuration() {
 pub(in crate::app) fn the_first_start_setup_saves_the_picked_choices_to_a_new_config() {
     use crate::app::commands::SetupAction;
     // As above, a child process so the user configuration paths can point at an empty folder.
-    if std::env::var_os("DUST_TEST_FIRST_START").is_none() {
+    if std::env::var_os("DUSTY_TEST_FIRST_START").is_none() {
         let root = tempdir().unwrap();
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", "app::configuration::tests::the_first_start_setup_saves_the_picked_choices_to_a_new_config", "--nocapture"])
-            .env("DUST_TEST_FIRST_START", "1")
-            .env("DUST_CONFIG_HOME", root.path())
-            .env("DUST_STATE_HOME", root.path().join("state"))
+            .env("DUSTY_TEST_FIRST_START", "1")
+            .env("DUSTY_CONFIG_HOME", root.path())
+            .env("DUSTY_STATE_HOME", root.path().join("state"))
             .output().unwrap();
         assert!(
             String::from_utf8_lossy(&output.stdout).contains("test result: ok. 1 passed;"),
@@ -2015,7 +2015,7 @@ pub(in crate::app) fn the_shortcuts_page_records_new_keys_and_resets_them() {
     use crate::app::commands::SettingsAction;
     use crate::ui::SettingsValue;
     // As above, a child process so the user configuration paths can point at a temporary folder.
-    if std::env::var_os("DUST_TEST_SHORTCUTS").is_none() {
+    if std::env::var_os("DUSTY_TEST_SHORTCUTS").is_none() {
         let root = tempdir().unwrap();
         fs::write(root.path().join("config.toml"), "").unwrap();
         let output = std::process::Command::new(std::env::current_exe().unwrap())
@@ -2024,9 +2024,9 @@ pub(in crate::app) fn the_shortcuts_page_records_new_keys_and_resets_them() {
                 "app::configuration::tests::the_shortcuts_page_records_new_keys_and_resets_them",
                 "--nocapture",
             ])
-            .env("DUST_TEST_SHORTCUTS", "1")
-            .env("DUST_CONFIG_HOME", root.path())
-            .env("DUST_STATE_HOME", root.path().join("state"))
+            .env("DUSTY_TEST_SHORTCUTS", "1")
+            .env("DUSTY_CONFIG_HOME", root.path())
+            .env("DUSTY_STATE_HOME", root.path().join("state"))
             .output()
             .unwrap();
         assert!(

@@ -216,7 +216,7 @@ fn make_logs(persist: bool) -> StructuredLogs {
             .map(String::from)
             .to_vec(),
         },
-        persist.then(|| crate::config::user_state_directory().join("dust.jsonl")),
+        persist.then(|| crate::config::user_state_directory().join("dusty.jsonl")),
         256,
     )
 }

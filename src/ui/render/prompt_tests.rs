@@ -150,7 +150,7 @@ fn prompt_help_reports_when_the_terminal_cannot_fit_the_message() {
 
 #[test]
 fn workspace_trust_prompt_is_one_centered_confirmation_panel() {
-    let state = EditorState::new(PathBuf::from("/tmp/dust-workspace"));
+    let state = EditorState::new(PathBuf::from("/tmp/dusty-workspace"));
     let loaded = crate::config::load_bundled_config();
     let mut prompt = PromptState::new(PromptKind::WorkspaceTrust);
     prompt.help = Some("Allows project commands.".into());
@@ -197,7 +197,7 @@ fn workspace_trust_prompt_is_one_centered_confirmation_panel() {
 
 #[test]
 fn prompt_clears_and_clips_the_editor_layer_beneath_its_box() {
-    let mut state = EditorState::new(PathBuf::from("/tmp/dust-workspace"));
+    let mut state = EditorState::new(PathBuf::from("/tmp/dusty-workspace"));
     state
         .open_text(
             crate::editor::text::TextBuffer::from_text(&vec!["X".repeat(100); 10].join("\n")),
@@ -304,7 +304,7 @@ fn command_completion_details_share_the_row_background_and_selection() {
 
 #[test]
 fn dashboard_and_prompt_render_at_multiple_sizes() {
-    let state = EditorState::new(PathBuf::from("/tmp/dust-workspace"));
+    let state = EditorState::new(PathBuf::from("/tmp/dusty-workspace"));
     for (width, height) in [(120, 40), (42, 10), (18, 5), (18, 1)] {
         let mut ui = UiState {
             dashboard: true,
@@ -332,12 +332,12 @@ fn dashboard_and_prompt_render_at_multiple_sizes() {
         if width >= dashboard_config.minimum_width && height >= dashboard_config.minimum_height {
             assert!(rows.iter().any(|row| row.contains("Find File")), "{rows:?}");
             assert!(
-                rows.iter().any(|row| row.contains("dust-workspace")),
+                rows.iter().any(|row| row.contains("dusty-workspace")),
                 "{rows:?}"
             );
         } else {
             assert!(
-                rows.iter().any(|row| row.contains("Dust — resize")),
+                rows.iter().any(|row| row.contains("Dusty — resize")),
                 "{rows:?}"
             );
         }

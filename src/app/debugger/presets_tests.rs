@@ -338,10 +338,10 @@ fn missing_preset_runtime_names_the_next_action() {
         .into_iter()
         .find(|launch| launch.preset.id == "node-file")
         .unwrap();
-    launch.preset.runtime = Some("dust-missing-debug-runtime-fixture".into());
+    launch.preset.runtime = Some("dusty-missing-debug-runtime-fixture".into());
     app.start_debug_preset(launch);
     let message = app.ui.notification.as_deref().unwrap();
-    assert!(message.contains("dust-missing-debug-runtime-fixture is missing"));
+    assert!(message.contains("dusty-missing-debug-runtime-fixture is missing"));
     assert!(message.contains("PATH") && message.contains("Space d s"));
     assert!(app.debugger_session.install_launch.is_none());
 }
@@ -367,7 +367,7 @@ fn cargo_build_and_exact_cursor_test_reach_the_dap_fixture() {
     );
     fs::write(
         app.state.workspace_root.join("Cargo.toml"),
-        "[package]\nname='dust-debug-fixture'\nversion='0.1.0'\nedition='2024'\n[workspace]\n",
+        "[package]\nname='dusty-debug-fixture'\nversion='0.1.0'\nedition='2024'\n[workspace]\n",
     )
     .unwrap();
     trust(&mut app);

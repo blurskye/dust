@@ -535,10 +535,10 @@ fn expired_callback_drops_late_edits_without_unloading_the_component() {
 #[test]
 fn fixture_wit_is_the_production_contract() {
     assert_eq!(
-        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/wit/dust-plugin.wit")),
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/wit/dusty-plugin.wit")),
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/retained-guest/wit/dust-plugin.wit"
+            "/tests/fixtures/retained-guest/wit/dusty-plugin.wit"
         ))
     );
 }

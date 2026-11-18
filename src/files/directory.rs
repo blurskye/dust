@@ -67,7 +67,7 @@ impl DirectoryWorker {
         let (sender, receiver) = mpsc::sync_channel(1);
         let worker_directory = directory.clone();
         thread::Builder::new()
-            .name(format!("dust-directory-{request_id}"))
+            .name(format!("dusty-directory-{request_id}"))
             .spawn(move || {
                 let result = (|| {
                     let canonical = canonical_path(&worker_directory)?;

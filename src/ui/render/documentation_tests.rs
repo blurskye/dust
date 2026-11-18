@@ -14,7 +14,7 @@ use crate::ui::render::composition_tests::render;
 
 #[test]
 fn documentation_popup_preserves_lines_clamps_and_protects_status_row() {
-    let mut state = EditorState::new(PathBuf::from("/tmp/dust-workspace"));
+    let mut state = EditorState::new(PathBuf::from("/tmp/dusty-workspace"));
     state
         .open_text(
             crate::editor::text::TextBuffer::from_text("cursor\nline\nline\nline\nline\nline"),

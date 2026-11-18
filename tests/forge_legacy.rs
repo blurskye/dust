@@ -7,29 +7,29 @@
 #[path = "support/forge_fake.rs"]
 mod forge_fake;
 
-use dust::forge::credential::Credential;
-use dust::forge::credential::CredentialSource;
-use dust::forge::credential::Secret;
-use dust::forge::http::HttpTransport;
-use dust::forge::legacy;
-use dust::forge::legacy::Shape;
-use dust::forge::model::ItemId;
-use dust::forge::model::ItemKind;
-use dust::forge::provider;
-use dust::forge::provider::Conditional;
-use dust::forge::provider::Fetched;
-use dust::forge::provider::ForgeContext;
-use dust::forge::provider::ProviderKind;
-use dust::forge::provider::RepoRef;
-use dust::forge::request::Filter;
-use dust::forge::request::Page;
-use dust::forge::request::Payload;
-use dust::forge::request::Read;
-use dust::forge::request::RunFilter;
-use dust::forge::request::StateFilter;
-use dust::forge::transport::ConnectOptions;
-use dust::forge::transport::Endpoints;
-use dust::forge::transport::HostKey;
+use dusty::forge::credential::Credential;
+use dusty::forge::credential::CredentialSource;
+use dusty::forge::credential::Secret;
+use dusty::forge::http::HttpTransport;
+use dusty::forge::legacy;
+use dusty::forge::legacy::Shape;
+use dusty::forge::model::ItemId;
+use dusty::forge::model::ItemKind;
+use dusty::forge::provider;
+use dusty::forge::provider::Conditional;
+use dusty::forge::provider::Fetched;
+use dusty::forge::provider::ForgeContext;
+use dusty::forge::provider::ProviderKind;
+use dusty::forge::provider::RepoRef;
+use dusty::forge::request::Filter;
+use dusty::forge::request::Page;
+use dusty::forge::request::Payload;
+use dusty::forge::request::Read;
+use dusty::forge::request::RunFilter;
+use dusty::forge::request::StateFilter;
+use dusty::forge::transport::ConnectOptions;
+use dusty::forge::transport::Endpoints;
+use dusty::forge::transport::HostKey;
 use serde_json::Value;
 use serde_json::json;
 use std::collections::BTreeSet;
@@ -105,7 +105,7 @@ impl Parity {
         let output = std::process::Command::new("python3")
             .arg(script)
             .args(args)
-            .env("DUST_GITHUB_FIXTURE", &state)
+            .env("DUSTY_GITHUB_FIXTURE", &state)
             .output()
             .unwrap();
         assert!(

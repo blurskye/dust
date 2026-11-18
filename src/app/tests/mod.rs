@@ -22,7 +22,7 @@ use crate::app::App;
 
 use crate::app::startup::StartupTarget;
 
-// Dust only offers Nix runtimes on Unix.
+// Dusty only offers Nix runtimes on Unix.
 #[cfg(unix)]
 #[test]
 fn nix_workspace_fallback_is_reserved_for_nixos_hosts() {

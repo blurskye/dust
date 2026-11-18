@@ -20,7 +20,7 @@ use crate::tools::install_prepare::MAXIMUM_TOOL_UNPACKED_BYTES;
 
 use crate::tools::runtimes::run_managed;
 
-pub(super) const MANAGED_RUNTIME_MARKER: &str = ".dust-runtime-sha256";
+pub(super) const MANAGED_RUNTIME_MARKER: &str = ".dusty-runtime-sha256";
 pub(super) const MAXIMUM_ELF_INTERPRETER_BYTES: u64 = 4096;
 pub(super) const MAXIMUM_ELF_PROGRAM_HEADERS: u16 = 256;
 
@@ -149,13 +149,13 @@ pub(super) fn patch_nix_compatible_executable(
     }
     if interpreter.contains("ld-musl") {
         return Err(format!(
-            "{} is dynamically linked against musl; Dust requires the verified GNU artifact on NixOS",
+            "{} is dynamically linked against musl; Dusty requires the verified GNU artifact on NixOS",
             path.display()
         ));
     }
     if interpreter.starts_with("/nix/store/") {
         return Err(format!(
-            "{} references a Nix interpreter outside Dust's compatibility profile",
+            "{} references a Nix interpreter outside Dusty's compatibility profile",
             path.display()
         ));
     }
@@ -193,13 +193,13 @@ pub(super) fn patch_nix_compatible_executable(
     }
     .map_err(|error| {
         format!(
-            "cannot apply Dust Nix compatibility to {}: {error}",
+            "cannot apply Dusty Nix compatibility to {}: {error}",
             path.display()
         )
     })?;
     if elf_interpreter(path)?.as_deref() != Some(runtime.loader.to_string_lossy().as_ref()) {
         return Err(format!(
-            "Dust Nix compatibility did not update {}",
+            "Dusty Nix compatibility did not update {}",
             path.display()
         ));
     }
@@ -260,7 +260,7 @@ pub(super) fn patch_nix_compatibility_tree(
 pub(super) fn runtime_artifact(name: &str) -> Result<BootstrapArtifact, String> {
     if !cfg!(target_os = "linux") {
         return Err(format!(
-            "Dust has no managed {name} download for {}; install it on PATH",
+            "Dusty has no managed {name} download for {}; install it on PATH",
             std::env::consts::OS
         ));
     }
@@ -290,7 +290,7 @@ pub(super) fn runtime_artifact(name: &str) -> Result<BootstrapArtifact, String> 
             executable_path: "rustup-init",
         }),
         _ => Err(format!(
-            "Dust has no managed {name} runtime for Linux {}",
+            "Dusty has no managed {name} runtime for Linux {}",
             std::env::consts::ARCH
         )),
     }

@@ -1,8 +1,8 @@
 //! The on-disk forge cache and painting from it (F3).
 #![cfg(unix)]
-use dust::forge::cache::{Cache, CacheKey, Caps, Envelope};
-use dust::forge::request::{Payload, Read};
-use dust::forge::transport::HostKey;
+use dusty::forge::cache::{Cache, CacheKey, Caps, Envelope};
+use dusty::forge::request::{Payload, Read};
+use dusty::forge::transport::HostKey;
 use std::time::{Duration, Instant};
 
 #[path = "support/forge_fake.rs"]

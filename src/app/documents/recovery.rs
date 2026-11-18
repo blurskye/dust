@@ -44,7 +44,7 @@ pub(super) enum RecoveryUpdate {
     CrashCleared,
 }
 
-/// Journals Dust lists at startup, keeps on disk, and how old one may get before cleanup.
+/// Journals Dusty lists at startup, keeps on disk, and how old one may get before cleanup.
 const MAXIMUM_DISCOVERED_JOURNALS: usize = 100;
 const MAXIMUM_RETAINED_JOURNALS: usize = 100;
 const MAXIMUM_JOURNAL_AGE_DAYS: u64 = 30;

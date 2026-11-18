@@ -1,9 +1,9 @@
 //! The Git tutor, driven through real screen input: every lesson advances only after
 //! the keys it teaches changed the practice repository or the screen, and quitting
 //! restores the user's own workspace untouched.
-use dust::editor::input::{KeyCode, KeyEvent, Modifiers};
-use dust::git::screen::GitScreen;
-use dust::ui::{Frame, KeyInputKind, UiEvent};
+use dusty::editor::input::{KeyCode, KeyEvent, Modifiers};
+use dusty::git::screen::GitScreen;
+use dusty::ui::{Frame, KeyInputKind, UiEvent};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -978,7 +978,7 @@ fn the_vim_lessons_teach_the_modes_and_appear_only_when_vim_is_on() {
     );
 
     let mut screen = GitScreen::open(dir.path()).unwrap();
-    screen.configure_input(&dust::config::load_bundled_config().config);
+    screen.configure_input(&dusty::config::load_bundled_config().config);
     let s = &mut screen;
     idle(s);
     command(s, &format!("tutor git {first}"));
@@ -996,7 +996,7 @@ fn the_vim_lessons_teach_the_modes_and_appear_only_when_vim_is_on() {
     reader(s);
     seek(s, "gamma");
     char(s, 'V');
-    assert_eq!(s.input_mode(), Some(dust::git::screen::InputMode::Visual));
+    assert_eq!(s.input_mode(), Some(dusty::git::screen::InputMode::Visual));
     assert!(
         banner(s).contains("Vim mode · Mode chip"),
         "advanced before Esc"
@@ -1009,13 +1009,13 @@ fn the_vim_lessons_teach_the_modes_and_appear_only_when_vim_is_on() {
     until(
         s,
         |s| char(s, 'c'),
-        |s| s.input_mode() == Some(dust::git::screen::InputMode::Insert),
+        |s| s.input_mode() == Some(dusty::git::screen::InputMode::Insert),
     );
     keys(s, "Learn the modes");
     key(s, KeyCode::Escape);
-    assert_eq!(s.input_mode(), Some(dust::git::screen::InputMode::Normal));
+    assert_eq!(s.input_mode(), Some(dusty::git::screen::InputMode::Normal));
     keys(s, "i!");
-    assert_eq!(s.input_mode(), Some(dust::git::screen::InputMode::Insert));
+    assert_eq!(s.input_mode(), Some(dusty::git::screen::InputMode::Insert));
     ctrl(s, KeyCode::Enter);
     at(s, first + 2);
 
@@ -1034,8 +1034,8 @@ fn the_vim_lessons_teach_the_modes_and_appear_only_when_vim_is_on() {
 #[test]
 fn the_lessons_spell_the_keys_of_the_preset_in_force() {
     let dir = repo();
-    let mut config = dust::config::load_bundled_config().config;
-    config.ui.git.keys = dust::config::GitKeys::Lazygit;
+    let mut config = dusty::config::load_bundled_config().config;
+    config.ui.git.keys = dusty::config::GitKeys::Lazygit;
     let mut screen = GitScreen::open(dir.path()).unwrap();
     screen.configure_input(&config);
     let s = &mut screen;

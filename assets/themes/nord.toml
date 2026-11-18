@@ -1,4 +1,4 @@
-# Dust semantic-role port; palette attribution: README.md and ../../LICENSES/MIT-nord.txt
+# Dusty semantic-role port; palette attribution: README.md and ../../LICENSES/MIT-nord.txt
 name = "nord"
 
 [styles.default]

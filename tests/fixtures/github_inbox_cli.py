@@ -7,7 +7,7 @@ import sys
 import time
 
 args = sys.argv[1:]
-path = pathlib.Path(os.environ["DUST_INBOX_STATE"])
+path = pathlib.Path(os.environ["DUSTY_INBOX_STATE"])
 state = json.loads(path.read_text())
 state.setdefault("calls", []).append({"args": args, "host": os.environ.get("GH_HOST")})
 

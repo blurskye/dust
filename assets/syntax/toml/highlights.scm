@@ -2,7 +2,7 @@
 ;-----------
 
 ; Upstream captures the whole pair, which painted every value in the key's colour.
-; Dust captures the keys alone, so strings, numbers and booleans keep their own.
+; Dusty captures the keys alone, so strings, numbers and booleans keep their own.
 (table
   [(bare_key) (quoted_key)] @keyword)
 

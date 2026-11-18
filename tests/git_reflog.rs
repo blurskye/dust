@@ -1,7 +1,7 @@
 //! Native reflog recovery against generated, real Git repositories.
-use dust::editor::input::{KeyCode, KeyEvent, Modifiers};
-use dust::git::screen::{GitScreen, ScreenOutcome};
-use dust::ui::{KeyInputKind, UiEvent};
+use dusty::editor::input::{KeyCode, KeyEvent, Modifiers};
+use dusty::git::screen::{GitScreen, ScreenOutcome};
+use dusty::ui::{KeyInputKind, UiEvent};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::{Duration, Instant};
@@ -545,7 +545,7 @@ fn worktree_destination_refusal_keeps_path_input_and_never_overwrites_existing_d
     std::fs::create_dir(&occupied).unwrap();
     std::fs::write(occupied.join("keep.txt"), "existing destination data\n").unwrap();
     let protected = fixture.destination("protected-name");
-    git(&fixture.root, &["branch", "dust-worktree/protected-name"]);
+    git(&fixture.root, &["branch", "dusty-worktree/protected-name"]);
     let registered = fixture.destination("registered");
     git(
         &fixture.root,

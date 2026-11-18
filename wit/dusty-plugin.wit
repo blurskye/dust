@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Public plugin ABI; see LICENSES/Apache-2.0.txt.
-package dust:plugin@0.4.0;
+package dusty:plugin@0.4.0;
 
 interface host {
   record snapshot { buffer: u64, revision: u64, utf8: string }

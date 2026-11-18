@@ -277,7 +277,7 @@ fn soft_reset_refreshes_status_even_when_index_and_head_files_do_not_change() {
     index.add_path(std::path::Path::new("near.txt")).unwrap();
     index.write().unwrap();
     let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
-    let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+    let sig = git2::Signature::now("Dusty", "dusty@example.invalid").unwrap();
     repo.commit(Some("HEAD"), &sig, &sig, "second", &tree, &[&old])
         .unwrap();
     app.start_git_status_refresh_with_feedback(false);
@@ -334,7 +334,7 @@ pub(in crate::app) fn near_changes_fixture() -> (
     index.add_path(std::path::Path::new("near.txt")).unwrap();
     index.write().unwrap();
     let tree_id = index.write_tree().unwrap();
-    let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+    let sig = git2::Signature::now("Dusty", "dusty@example.invalid").unwrap();
     repo.commit(
         Some("HEAD"),
         &sig,
@@ -600,7 +600,7 @@ fn named_staging_commands_change_only_the_index() {
         .unwrap();
     index.write().unwrap();
     let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
-    let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+    let sig = git2::Signature::now("Dusty", "dusty@example.invalid").unwrap();
     repo.commit(Some("HEAD"), &sig, &sig, "fixture", &tree, &[])
         .unwrap();
     drop(tree);
@@ -740,7 +740,7 @@ fn staging_an_unsaved_buffer_offers_an_explicit_choice() {
     index.add_path(std::path::Path::new("choice.txt")).unwrap();
     index.write().unwrap();
     let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
-    let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+    let sig = git2::Signature::now("Dusty", "dusty@example.invalid").unwrap();
     repo.commit(Some("HEAD"), &sig, &sig, "fixture", &tree, &[])
         .unwrap();
     drop(tree);
@@ -860,7 +860,7 @@ fn status_reports_a_path_whose_only_change_is_an_unsaved_buffer() {
         .unwrap();
     index.write().unwrap();
     let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
-    let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+    let sig = git2::Signature::now("Dusty", "dusty@example.invalid").unwrap();
     repo.commit(Some("HEAD"), &sig, &sig, "fixture", &tree, &[])
         .unwrap();
     drop(tree);
@@ -912,7 +912,7 @@ fn staging_one_of_two_changed_lines_keeps_the_file_in_order() {
     index.add_path(std::path::Path::new("pair.txt")).unwrap();
     index.write().unwrap();
     let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
-    let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+    let sig = git2::Signature::now("Dusty", "dusty@example.invalid").unwrap();
     repo.commit(Some("HEAD"), &sig, &sig, "fixture", &tree, &[])
         .unwrap();
     drop(tree);
@@ -968,9 +968,9 @@ pub(in crate::app) fn history_fixture(
     let repo = git2::Repository::init(root).unwrap();
     {
         let mut config = repo.config().unwrap();
-        config.set_str("user.name", "Dust Fixture").unwrap();
+        config.set_str("user.name", "Dusty Fixture").unwrap();
         config
-            .set_str("user.email", "dust@example.invalid")
+            .set_str("user.email", "dusty@example.invalid")
             .unwrap();
     }
     for (index, subject) in subjects.iter().enumerate() {
@@ -980,7 +980,7 @@ pub(in crate::app) fn history_fixture(
         index_file.add_path(std::path::Path::new(&name)).unwrap();
         index_file.write().unwrap();
         let tree = repo.find_tree(index_file.write_tree().unwrap()).unwrap();
-        let sig = git2::Signature::now("Dust Fixture", "dust@example.invalid").unwrap();
+        let sig = git2::Signature::now("Dusty Fixture", "dusty@example.invalid").unwrap();
         let parent = repo.head().ok().and_then(|head| head.peel_to_commit().ok());
         let parents: Vec<&git2::Commit> = parent.iter().collect();
         repo.commit(Some("HEAD"), &sig, &sig, subject, &tree, &parents)
@@ -1199,7 +1199,7 @@ fn choosing_a_side_edits_the_result_buffer_and_leaves_save_and_stage_separate() 
     let (_app_dirs, mut app) = app();
     let repo = history_fixture(&app.state.workspace_root, &["base"]);
     let root = app.state.workspace_root.clone();
-    let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+    let sig = git2::Signature::now("Dusty", "dusty@example.invalid").unwrap();
     let base_tip = repo.head().unwrap().target().unwrap();
     let base_commit = repo.find_commit(base_tip).unwrap();
     repo.branch("theirs", &base_commit, false).unwrap();
@@ -1340,7 +1340,7 @@ fn a_previewed_replacement_writes_nothing_until_it_is_confirmed() {
     let root = app.state.workspace_root.clone();
     let (our_tip, _their_tip) = {
         let repo = history_fixture(&root, &["base"]);
-        let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+        let sig = git2::Signature::now("Dusty", "dusty@example.invalid").unwrap();
         let base_tip = repo.head().unwrap().target().unwrap();
         let base_commit = repo.find_commit(base_tip).unwrap();
         repo.branch("theirs", &base_commit, false).unwrap();
@@ -1549,7 +1549,7 @@ fn a_previewed_replacement_writes_nothing_until_it_is_confirmed() {
 fn the_changes_surface_renders_its_sections_columns_badge_and_footer() {
     let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
-    let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+    let sig = git2::Signature::now("Dusty", "dusty@example.invalid").unwrap();
     let write = |name: &str, text: &str| {
         fs::write(app.state.workspace_root.join(name), text).unwrap();
     };
@@ -1819,7 +1819,7 @@ fn editing_a_missing_path_starts_a_new_file_that_saving_creates() {
 fn a_change_refresh_keeps_the_selection_on_the_same_row() {
     let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
-    let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+    let sig = git2::Signature::now("Dusty", "dusty@example.invalid").unwrap();
     for name in ["a.txt", "b.txt", "c.txt"] {
         fs::write(app.state.workspace_root.join(name), "one\n").unwrap();
         let mut index = repo.index().unwrap();
@@ -1872,7 +1872,7 @@ fn a_change_refresh_keeps_the_selection_on_the_same_row() {
 fn staging_a_row_moves_it_to_the_staged_section_of_the_open_list() {
     let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
-    let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+    let sig = git2::Signature::now("Dusty", "dusty@example.invalid").unwrap();
     let path = app.state.workspace_root.join("changed.txt");
     fs::write(&path, "base\n").unwrap();
     let mut index = repo.index().unwrap();
@@ -1948,7 +1948,7 @@ fn staging_a_row_moves_it_to_the_staged_section_of_the_open_list() {
 fn ctrl_q_sends_the_change_rows_to_the_results_surface() {
     let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
-    let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+    let sig = git2::Signature::now("Dusty", "dusty@example.invalid").unwrap();
     fs::write(app.state.workspace_root.join("a.txt"), "one\n").unwrap();
     {
         let mut index = repo.index().unwrap();
@@ -2267,7 +2267,7 @@ fn staging_an_unsaved_buffer_offers_an_explicit_choice_slot5() {
     index.add_path(std::path::Path::new("choice.txt")).unwrap();
     index.write().unwrap();
     let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
-    let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+    let sig = git2::Signature::now("Dusty", "dusty@example.invalid").unwrap();
     repo.commit(Some("HEAD"), &sig, &sig, "fixture", &tree, &[])
         .unwrap();
     drop(tree);
@@ -2390,7 +2390,7 @@ fn a_previewed_replacement_writes_nothing_until_it_is_confirmed_slot5() {
     let root = app.state.workspace_root.clone();
     let (our_tip, _their_tip) = {
         let repo = history_fixture(&root, &["base"]);
-        let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+        let sig = git2::Signature::now("Dusty", "dusty@example.invalid").unwrap();
         let base_tip = repo.head().unwrap().target().unwrap();
         let base_commit = repo.find_commit(base_tip).unwrap();
         repo.branch("theirs", &base_commit, false).unwrap();

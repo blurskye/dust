@@ -443,7 +443,7 @@ impl App {
                     }
                     for ((id, _), path) in call.buffers.iter_mut().zip(&paths[count..]) {
                         if call.operation.changes(path) && self.state.buffers[*id].dirty {
-                            return Err("file has unsaved changes in Dust".into());
+                            return Err("file has unsaved changes in Dusty".into());
                         }
                     }
                     for ((_, stored), path) in call.buffers.iter_mut().zip(&paths[count..]) {

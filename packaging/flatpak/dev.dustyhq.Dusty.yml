@@ -1,0 +1,40 @@
+# Flatpak of the static release binary. Programs Dusty starts (shells, language
+# servers, git) run inside the sandbox with the Freedesktop runtime, not the host's;
+# `flatpak-spawn --host` reaches host programs.
+id: dev.dustyhq.Dusty
+runtime: org.freedesktop.Platform
+runtime-version: '26.08'
+sdk: org.freedesktop.Sdk
+command: dusty
+finish-args:
+  - --share=network
+  - --filesystem=host
+  - --talk-name=org.freedesktop.Flatpak
+modules:
+  - name: dusty
+    buildsystem: simple
+    build-commands:
+      - install -Dm 0755 dusty /app/bin/dusty
+      - install -Dm 0755 dusty-git /app/bin/dusty-git
+      - install -Dm 0644 dev.dustyhq.Dusty.desktop /app/share/applications/dev.dustyhq.Dusty.desktop
+      - install -Dm 0644 dev.dustyhq.Dusty.svg /app/share/icons/hicolor/scalable/apps/dev.dustyhq.Dusty.svg
+      - install -Dm 0644 dev.dustyhq.Dusty.metainfo.xml /app/share/metainfo/dev.dustyhq.Dusty.metainfo.xml
+      - mkdir -p /app/share/licenses/dusty && cp -r LICENSE NOTICE LICENSES /app/share/licenses/dusty/
+    sources:
+      - type: file
+        path: ../../target/package-stage/dusty/dusty
+      - type: file
+        path: ../../target/package-stage/dusty/dusty-git
+      - type: file
+        path: ../dev.dustyhq.Dusty.desktop
+      - type: file
+        path: ../dev.dustyhq.Dusty.svg
+      - type: file
+        path: ../dev.dustyhq.Dusty.metainfo.xml
+      - type: file
+        path: ../../LICENSE
+      - type: file
+        path: ../../NOTICE
+      - type: dir
+        path: ../../LICENSES
+        dest: LICENSES

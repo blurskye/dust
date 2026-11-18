@@ -17,13 +17,13 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::Parser;
-use dust::app::run_interactive;
-use dust::app::startup::resolve_startup;
-use dust::config::load_bundled_config;
-use dust::config::load_user_config;
+use dusty::app::run_interactive;
+use dusty::app::startup::resolve_startup;
+use dusty::config::load_bundled_config;
+use dusty::config::load_user_config;
 
 #[derive(Debug, Parser)]
-#[command(name = "dust", version, about = "Dust modal terminal IDE")]
+#[command(name = "dusty", version, about = "Dusty modal terminal IDE")]
 struct Cli {
     #[command(subcommand)]
     command: Option<CliCommand>,
@@ -93,7 +93,7 @@ struct Cli {
     #[arg(long, requires = "package_root")]
     package_list: bool,
 
-    /// Open files in the Dust that started this program (lazygit's edit key does this).
+    /// Open files in the Dusty that started this program (lazygit's edit key does this).
     #[arg(long, value_name = "FILE", num_args = 1..)]
     remote: Vec<PathBuf>,
 
@@ -102,7 +102,7 @@ struct Cli {
     line: Option<usize>,
 
     /// Serve the subagent tool over MCP for the agent tab TAB, or the one in
-    /// `DUST_AGENT_TAB` (Dust starts this itself, or an agent's MCP config names it).
+    /// `DUSTY_AGENT_TAB` (Dusty starts this itself, or an agent's MCP config names it).
     #[arg(long, value_name = "TAB", hide = true, num_args = 0..=1)]
     agent_tools: Option<Option<u64>>,
 }
@@ -124,50 +124,50 @@ enum PluginCommand {
 
 fn main() -> ExitCode {
     // The Git tab paints its last status, History and branches before git answers.
-    dust::git::screen::enable_warm_cache();
+    dusty::git::screen::enable_warm_cache();
     #[cfg(unix)]
     {
         let mut arguments = std::env::args_os().skip(1);
         let first = arguments.next();
         if first.as_deref()
             == Some(std::ffi::OsStr::new(
-                dust::debugger::ADAPTER_BRIDGE_ARGUMENT,
+                dusty::debugger::ADAPTER_BRIDGE_ARGUMENT,
             ))
         {
             let Some(program) = arguments.next() else {
                 return ExitCode::FAILURE;
             };
             let rest: Vec<_> = arguments.collect();
-            return match dust::debugger::bridge_adapter_socket(&program, &rest) {
+            return match dusty::debugger::bridge_adapter_socket(&program, &rest) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(error) => {
-                    eprintln!("dust: {}", error.to_string().escape_debug());
+                    eprintln!("dusty: {}", error.to_string().escape_debug());
                     ExitCode::FAILURE
                 }
             };
         }
         if first.as_deref()
             == Some(std::ffi::OsStr::new(
-                dust::debugger::ADAPTER_SESSION_ARGUMENT,
+                dusty::debugger::ADAPTER_SESSION_ARGUMENT,
             ))
         {
             let Some(program) = arguments.next() else {
                 return ExitCode::FAILURE;
             };
             let rest: Vec<_> = arguments.collect();
-            let error = dust::debugger::exec_in_own_session(&program, &rest);
-            eprintln!("dust: {}", error.to_string().escape_debug());
+            let error = dusty::debugger::exec_in_own_session(&program, &rest);
+            eprintln!("dusty: {}", error.to_string().escape_debug());
             return ExitCode::FAILURE;
         }
         if let Ok(binary) = std::env::current_exe() {
-            dust::debugger::use_adapter_session_launcher(binary);
+            dusty::debugger::use_adapter_session_launcher(binary);
         }
     }
     install_crash_hook();
     match run(Cli::parse()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("dust: {}", error.to_string().escape_debug());
+            eprintln!("dusty: {}", error.to_string().escape_debug());
             ExitCode::FAILURE
         }
     }
@@ -178,7 +178,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         command: PluginCommand::New { name },
     }) = cli.command
     {
-        let directory = dust::plugins::scaffold::create(&std::env::current_dir()?, &name)?;
+        let directory = dusty::plugins::scaffold::create(&std::env::current_dir()?, &name)?;
         println!(
             "Created {} — see README.md for build, pack and load instructions",
             directory.display()
@@ -187,24 +187,24 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     }
     if let Some(tab) = cli.agent_tools {
         let tab = tab.or_else(|| {
-            std::env::var(dust::agent::mcp::TAB_VARIABLE)
+            std::env::var(dusty::agent::mcp::TAB_VARIABLE)
                 .ok()?
                 .parse()
                 .ok()
         });
-        let server = std::env::var_os(dust::remote::SERVER_VARIABLE).map(Into::into);
-        let profiles = std::env::var(dust::agent::mcp::PROFILES_VARIABLE).unwrap_or_default();
-        dust::agent::mcp::serve(server.zip(tab), &profiles)?;
+        let server = std::env::var_os(dusty::remote::SERVER_VARIABLE).map(Into::into);
+        let profiles = std::env::var(dusty::agent::mcp::PROFILES_VARIABLE).unwrap_or_default();
+        dusty::agent::mcp::serve(server.zip(tab), &profiles)?;
         return Ok(());
     }
     if !cli.remote.is_empty() {
-        let server = std::env::var_os(dust::remote::SERVER_VARIABLE)
-            .ok_or("--remote only works from a terminal started by Dust")?;
-        dust::remote::send(Path::new(&server), &cli.remote, cli.line)?;
+        let server = std::env::var_os(dusty::remote::SERVER_VARIABLE)
+            .ok_or("--remote only works from a terminal started by Dusty")?;
+        dusty::remote::send(Path::new(&server), &cli.remote, cli.line)?;
         return Ok(());
     }
     if let Some(path) = &cli.check_api_compatibility {
-        let report = dust::api::check_compatibility(path, 1024 * 1024)?;
+        let report = dusty::api::check_compatibility(path, 1024 * 1024)?;
         println!("{}", serde_json::to_string_pretty(&report)?);
         if !report.compatible {
             return Err("API manifest is incompatible".into());
@@ -213,7 +213,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     }
     if let Some(root) = &cli.package_root {
         let manager =
-            dust::tools::PackageStore::new(root.clone(), 16 * 1024 * 1024, 64 * 1024 * 1024)?;
+            dusty::tools::PackageStore::new(root.clone(), 16 * 1024 * 1024, 64 * 1024 * 1024)?;
         if let Some(name) = &cli.package_remove {
             let lock = manager.remove(name)?;
             println!("removed {name}; {} package(s) remain", lock.packages.len());
@@ -235,12 +235,12 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             .as_ref()
             .ok_or("--package-store is required")?;
         let count =
-            dust::tools::verify_lock_store(lock, store, 16 * 1024 * 1024, 64 * 1024 * 1024)?;
+            dusty::tools::verify_lock_store(lock, store, 16 * 1024 * 1024, 64 * 1024 * 1024)?;
         println!("verified {count} package(s)");
         return Ok(());
     }
     if let Some(path) = &cli.migrate_config {
-        let path = dust::files::canonicalize(path)?;
+        let path = dusty::files::canonicalize(path)?;
         if !fs::metadata(&path)?.is_file() {
             return Err("configuration must be a regular file".into());
         }
@@ -259,22 +259,25 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             return Err("configuration exceeds migration limit".into());
         }
         let source = String::from_utf8(bytes)?;
-        let (migrated, changed) = dust::config::migrate_config_source(&source)
+        let (migrated, changed) = dusty::config::migrate_config_source(&source)
             .map_err(|error| format!("migration failed: {error}"))?;
         if cli.apply_migration && changed {
-            dust::config::apply_config_migration(&path, &source, &migrated)?;
+            dusty::config::apply_config_migration(&path, &source, &migrated)?;
         } else {
             print!("{migrated}");
         }
         return Ok(());
     }
     if cli.api_manifest {
-        println!("{}", serde_json::to_string_pretty(&dust::api::manifest()?)?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&dusty::api::manifest()?)?
+        );
         return Ok(());
     }
     if cli.verbose_version {
         println!(
-            "dust {} {}-{} component-model=true",
+            "dusty {} {}-{} component-model=true",
             env!("CARGO_PKG_VERSION"),
             std::env::consts::OS,
             std::env::consts::ARCH
@@ -287,13 +290,13 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         load_user_config()
     };
     if cli.check_config {
-        dust::app::validate_loaded_configuration(config.clone())?;
+        dusty::app::validate_loaded_configuration(config.clone())?;
         println!("configuration valid");
         return Ok(());
     }
     if cli.health {
-        let state = dust::config::user_state_directory();
-        let mut snapshot = dust::telemetry::HealthSnapshot {
+        let state = dusty::config::user_state_directory();
+        let mut snapshot = dusty::telemetry::HealthSnapshot {
             config_degraded: config.diagnostic.is_some(),
             ..Default::default()
         };
@@ -319,7 +322,8 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     let safe_mode = cli.safe_mode
-        || previous_crash_count(&dust::config::user_state_directory().join("last-crash.json")) >= 2;
+        || previous_crash_count(&dusty::config::user_state_directory().join("last-crash.json"))
+            >= 2;
     run_interactive(startup, config, safe_mode)?;
     Ok(())
 }
@@ -356,7 +360,7 @@ fn install_crash_hook() {
     std::panic::set_hook(Box::new(move |info| {
         let _ = disable_raw_mode();
         let _ = execute!(std::io::stderr(), LeaveAlternateScreen, Show);
-        let state = dust::config::user_state_directory();
+        let state = dusty::config::user_state_directory();
         let _ = fs::create_dir_all(&state);
         #[cfg(unix)]
         {
@@ -419,14 +423,16 @@ mod tests {
     #[test]
     fn plugin_subcommand_preserves_file_arguments() {
         assert!(
-            matches!(Cli::try_parse_from(["dust", "plugin", "new", "words"]).unwrap().command, Some(CliCommand::Plugin { command: PluginCommand::New { name } }) if name == "words")
+            matches!(Cli::try_parse_from(["dusty", "plugin", "new", "words"]).unwrap().command, Some(CliCommand::Plugin { command: PluginCommand::New { name } }) if name == "words")
         );
         assert_eq!(
-            Cli::try_parse_from(["dust", "file.rs"]).unwrap().paths,
+            Cli::try_parse_from(["dusty", "file.rs"]).unwrap().paths,
             vec![PathBuf::from("file.rs")]
         );
         assert_eq!(
-            Cli::try_parse_from(["dust", "--", "plugin"]).unwrap().paths,
+            Cli::try_parse_from(["dusty", "--", "plugin"])
+                .unwrap()
+                .paths,
             vec![PathBuf::from("plugin")]
         );
     }

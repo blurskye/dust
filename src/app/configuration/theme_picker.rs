@@ -118,7 +118,7 @@ impl App {
             .collect();
         self.install_surface_picker_state(
             PickerSurfaceKind::Theme,
-            "Dust themes".into(),
+            "Dusty themes".into(),
             items,
             String::new(),
             !rows.loading,

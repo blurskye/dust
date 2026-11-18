@@ -4,10 +4,10 @@
 fn plugin_new_creates_a_guest_and_refuses_overwrite() {
     let root = tempfile::tempdir().unwrap();
     let run = || {
-        std::process::Command::new(env!("CARGO_BIN_EXE_dust"))
+        std::process::Command::new(env!("CARGO_BIN_EXE_dusty"))
             .current_dir(root.path())
             .args(["plugin", "new", "words"])
-            .env("DUST_STATE_HOME", root.path().join("state"))
+            .env("DUSTY_STATE_HOME", root.path().join("state"))
             .output()
             .unwrap()
     };
@@ -21,7 +21,7 @@ fn plugin_new_creates_a_guest_and_refuses_overwrite() {
         "Cargo.toml",
         "Cargo.lock",
         "src/lib.rs",
-        "wit/dust-plugin.wit",
+        "wit/dusty-plugin.wit",
         "manifest.toml",
         "README.md",
     ] {

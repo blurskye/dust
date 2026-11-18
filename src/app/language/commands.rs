@@ -98,7 +98,7 @@ pub(in crate::app) fn register_commands(
         ),
         (
             "tools.uninstall",
-            "Uninstall selected Dust-owned runtime",
+            "Uninstall selected Dusty-owned runtime",
             AppEffect::UninstallSelectedTool,
         ),
         (

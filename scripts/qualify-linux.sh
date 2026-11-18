@@ -16,8 +16,8 @@ case "$mode" in
     cargo clippy --locked --all-targets -- -D warnings
     ;;
   pty)
-    test -x target/release/dust || { echo 'release binary required' >&2; exit 2; }
-    python3 tests/pty_smoke.py --binary target/release/dust
+    test -x target/release/dusty || { echo 'release binary required' >&2; exit 2; }
+    python3 tests/pty_smoke.py --binary target/release/dusty
     ;;
   release)
     cargo build --release --locked
@@ -37,7 +37,7 @@ case "$mode" in
     for target in $(cargo fuzz list); do cargo fuzz run "$target" -- -max_total_time=30; done
     ;;
   soak)
-    iterations="${DUST_SOAK_ITERATIONS:-20}"
+    iterations="${DUSTY_SOAK_ITERATIONS:-20}"
     for ((i=0;i<iterations;i++)); do cargo run --quiet --locked --example foreground_bench >/dev/null; done
     cargo run --quiet --locked --example workspace_search_bench >/dev/null
     ;;

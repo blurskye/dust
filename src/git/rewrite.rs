@@ -208,7 +208,7 @@ fn execute(plan: Plan, message: String) -> Result<Outcome, String> {
     }
     plan.validate(&repo)?;
     let old = repo.find_commit(plan.head).map_err(error)?;
-    let recovery = format!("refs/dust/rewrite/{}", plan.head);
+    let recovery = format!("refs/dusty/rewrite/{}", plan.head);
     // Resolve commit/signing configuration against the original checkout.
     // includeIf.onbranch/gitdir must not silently disable signing in the private HEAD.
     let effective = run_git(
@@ -276,7 +276,7 @@ fn execute(plan: Plan, message: String) -> Result<Outcome, String> {
     no_reference_hook(&reference_hook)?;
     // libgit2 publication cannot invoke Git's reference-transaction policy hook.
     // Refuse that configuration rather than silently bypassing a local policy.
-    repo.reference(&recovery, plan.head, false, "dust: before local rewrite")
+    repo.reference(&recovery, plan.head, false, "dusty: before local rewrite")
         .or_else(|e| {
             if repo.find_reference(&recovery).ok().and_then(|r| r.target()) == Some(plan.head) {
                 repo.find_reference(&recovery)
@@ -290,7 +290,7 @@ fn execute(plan: Plan, message: String) -> Result<Outcome, String> {
     // preventing Git from publishing against a different HEAD mid-command.
     // Shared objects/config, original worktree, isolated index and HEAD.
     let private = tempfile::Builder::new()
-        .prefix("dust-rewrite-")
+        .prefix("dusty-rewrite-")
         .tempdir_in(repo.path())
         .map_err(error)?;
     let common = crate::files::canonicalize(repo.commondir()).map_err(error)?;
@@ -348,14 +348,14 @@ fn execute(plan: Plan, message: String) -> Result<Outcome, String> {
         .and_then(|head| head.peel_to_commit())
         .map_err(error)?;
     // Keep completed objects reachable even if validation/publication fails.
-    let result_ref = format!("refs/dust/rewrite-result/{}", created.id());
+    let result_ref = format!("refs/dusty/rewrite-result/{}", created.id());
     no_reference_hook(&reference_hook)
         .map_err(|e| format!("{e}; HEAD unchanged; prepared object {}", created.id()))?;
     repo.reference(
         &result_ref,
         created.id(),
         false,
-        "dust: prepared local commit",
+        "dusty: prepared local commit",
     )
     .or_else(|e| {
         if repo
@@ -401,7 +401,7 @@ fn execute(plan: Plan, message: String) -> Result<Outcome, String> {
             reference,
             created.id(),
             Some(&committer),
-            "dust: local commit rewrite",
+            "dusty: local commit rewrite",
         )
         .map_err(publication_error)?;
     // Normal branch publication already appends HEAD through libgit2. Keep
@@ -469,7 +469,7 @@ fn raw_reflog_record(old: Oid, created: &git2::Commit<'_>) -> Result<Vec<u8>, St
     }
     let mut record = format!("{old} {} ", created.id()).into_bytes();
     record.extend_from_slice(committer);
-    record.extend_from_slice(b"\tdust: local commit rewrite\n");
+    record.extend_from_slice(b"\tdusty: local commit rewrite\n");
     Ok(record)
 }
 

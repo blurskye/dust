@@ -259,7 +259,7 @@ impl LspClient {
         // rustup proxy binaries still dispatch from the requested argv[0].
         let executable_name = requested_executable_name(definition);
         let thread = thread::Builder::new()
-            .name(format!("dust-lsp-{server}"))
+            .name(format!("dusty-lsp-{server}"))
             .spawn(move || {
                 send_event(
                     &events,
@@ -744,7 +744,7 @@ pub(super) fn run_session(
                         )?;
                         // Configuration-capable servers such as Pyright defer document
                         // work until the client publishes its initial settings snapshot.
-                        // Dust has no adapter settings here, so the explicit empty object
+                        // Dusty has no adapter settings here, so the explicit empty object
                         // is the protocol-correct initial state rather than no state.
                         write_content_length_message(
                             &mut stdin,

@@ -1,7 +1,7 @@
 //! Branch merges, rebases and paused-operation actions through native input and real repositories.
-use dust::editor::input::{KeyCode, KeyEvent, Modifiers};
-use dust::git::screen::GitScreen;
-use dust::ui::{Frame, GitSurface, KeyInputKind, Style, UiEvent};
+use dusty::editor::input::{KeyCode, KeyEvent, Modifiers};
+use dusty::git::screen::GitScreen;
+use dusty::ui::{Frame, GitSurface, KeyInputKind, Style, UiEvent};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -1167,10 +1167,10 @@ fn operation_confirmation_shows_destination_and_current_blockers_without_form_sc
         // The focused action is the shared filled button chip (R16 #22).
         assert_eq!(
             frame.grid.get(x, y).unwrap().style,
-            dust::ui::Style::Git {
-                role: dust::ui::GitRole::OnFocus,
-                surface: dust::ui::GitSurface::ChipActive,
-                emphasis: dust::ui::Emphasis::Bold,
+            dusty::ui::Style::Git {
+                role: dusty::ui::GitRole::OnFocus,
+                surface: dusty::ui::GitSurface::ChipActive,
+                emphasis: dusty::ui::Emphasis::Bold,
             }
         );
         key(&mut screen, KeyCode::Tab);
@@ -1225,7 +1225,7 @@ fn rebase_confirmation_refuses_changed_start_onto_or_branch_metadata() {
 
 #[test]
 fn git_jobs_preserve_private_user_configuration_for_rebase_and_commit() {
-    const CHILD: &str = "DUST_GIT_ENV_TEST_CHILD";
+    const CHILD: &str = "DUSTY_GIT_ENV_TEST_CHILD";
     if std::env::var_os(CHILD).is_none() {
         let directory = tempfile::tempdir().unwrap();
         let config = directory.path().join("gitconfig");

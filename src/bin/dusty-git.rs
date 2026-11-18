@@ -2,8 +2,8 @@
 //! forge layer as JSON for other editors. `dusty-git open <link>` starts on
 //! the pull request, issue or run a web address or `#123` names.
 use clap::Parser;
-use dust::git::screen::{GitScreen, ScreenOutcome};
-use dust::ui::{TerminalOptions, TerminalSession};
+use dusty::git::screen::{GitScreen, ScreenOutcome};
+use dusty::ui::{TerminalOptions, TerminalSession};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -51,10 +51,10 @@ fn open_arguments(args: Vec<std::ffi::OsString>) -> Result<Vec<std::ffi::OsStrin
 fn main() -> std::process::ExitCode {
     let args = std::env::args_os().collect::<Vec<_>>();
     if args.get(1).is_some_and(|arg| arg == "forge") {
-        return std::process::ExitCode::from(dust::forge::command::main(args[1..].to_vec()));
+        return std::process::ExitCode::from(dusty::forge::command::main(args[1..].to_vec()));
     }
     // A reopened Git tab paints its last status, History and branches before git answers.
-    dust::git::screen::enable_warm_cache();
+    dusty::git::screen::enable_warm_cache();
     let args = match open_arguments(args) {
         Ok(args) => args,
         Err(error) => {
@@ -73,9 +73,9 @@ fn main() -> std::process::ExitCode {
 fn run(args: Vec<std::ffi::OsString>) -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse_from(args);
     let config = if cli.clean {
-        dust::config::load_bundled_config()
+        dusty::config::load_bundled_config()
     } else {
-        dust::config::load_user_config()
+        dusty::config::load_user_config()
     };
     let options = TerminalOptions {
         color_mode: config.config.ui.color_mode,
@@ -152,9 +152,9 @@ fn run(args: Vec<std::ffi::OsString>) -> Result<(), Box<dyn std::error::Error>> 
                     if let Err(e) = status {
                         return Err(e.into());
                     }
-                    screen.event(dust::ui::UiEvent::Key {
-                        key: dust::editor::input::KeyEvent::character('r'),
-                        kind: dust::ui::KeyInputKind::Press,
+                    screen.event(dusty::ui::UiEvent::Key {
+                        key: dusty::editor::input::KeyEvent::character('r'),
+                        kind: dusty::ui::KeyInputKind::Press,
                     });
                 }
             }

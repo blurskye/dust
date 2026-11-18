@@ -49,7 +49,7 @@ use crate::config::load_keymaps;
 fn bundled_theme_ports_validate_and_load_by_name_without_installed_files() {
     let mut backgrounds = BTreeSet::new();
     for name in [
-        "dust",
+        "dusty",
         "catppuccin-latte",
         "catppuccin-frappe",
         "catppuccin-macchiato",
@@ -173,7 +173,7 @@ fn prose_code_matches_the_editor_code_block_in_every_bundled_theme() {
         );
     }
     // Only a theme whose pane sits on the editor's code colour is lifted.
-    assert_eq!(lifted, ["dust"]);
+    assert_eq!(lifted, ["dusty"]);
 }
 
 #[test]
@@ -535,11 +535,11 @@ fn configuration_bundle(theme: &str, revision: u8, valid: bool) -> Configuration
                 "/assets/defaults/dashboard.toml"
             ))
             .replace(
-                "identity = \"dust\"",
+                "identity = \"dusty\"",
                 &format!("identity = \"dashboard-{revision}\""),
             ),
             Some(_) => BUNDLED_THEME
-                .replace("name = \"dust\"", &format!("name = \"{theme}\""))
+                .replace("name = \"dusty\"", &format!("name = \"{theme}\""))
                 .replace("#c9d1d9", if revision == 0 { "#c9d1d9" } else { "#c9d1d8" }),
             None => panic!("unexpected captured path {}", path.display()),
         };
@@ -555,14 +555,14 @@ fn captured_bundle_identity_exposes_aba_and_uses_the_same_text_for_spans() {
         env!("CARGO_MANIFEST_DIR"),
         "/assets/defaults/dashboard.toml"
     ))
-    .replace("identity = \"dust\"", "identity = \"CAPTURED DASH\"");
+    .replace("identity = \"dusty\"", "identity = \"CAPTURED DASH\"");
     let theme = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/assets/themes/dust.toml"
+        "/assets/themes/dusty.toml"
     ))
-    .replace("name = \"dust\"", "name = \"night\"");
+    .replace("name = \"dusty\"", "name = \"night\"");
     let reads = Cell::new(0_usize);
-    let bundle = capture_configuration_bundle_with("dust", |path| {
+    let bundle = capture_configuration_bundle_with("dusty", |path| {
         reads.set(reads.get() + 1);
         let text = match path.file_name().and_then(|name| name.to_str()) {
             Some("config.toml") => config.to_owned(),
@@ -616,7 +616,7 @@ fn captured_bundle_identity_exposes_aba_and_uses_the_same_text_for_spans() {
 fn captured_bundle_identity_detects_missing_created_and_deleted_sources() {
     let config = captured(
         crate::config::user_config_path(),
-        CapturedText::Text("[ui]\ntheme='dust'\n".into()),
+        CapturedText::Text("[ui]\ntheme='dusty'\n".into()),
     );
     let missing = captured(crate::config::user_keymaps_path(), CapturedText::Missing);
     let created = captured(
@@ -639,28 +639,28 @@ fn consistent_loader_retries_same_theme_changes_and_theme_source_switches() {
     let revision = Cell::new(0_u8);
     let loads = Cell::new(0_usize);
     let (stable, fingerprint) = capture_consistent_configuration_bundle_with(
-        "dust",
+        "dusty",
         |_| {
             loads.set(loads.get() + 1);
             if loads.get() == 1 {
                 revision.set(1);
             }
-            configuration_bundle("dust", revision.get(), true)
+            configuration_bundle("dusty", revision.get(), true)
         },
-        |_| configuration_bundle("dust", revision.get(), true).identity(),
+        |_| configuration_bundle("dusty", revision.get(), true).identity(),
     )
     .expect("eventually stable");
     assert_eq!(loads.get(), 2);
     assert_eq!(
         fingerprint,
-        configuration_bundle("dust", 1, true).identity()
+        configuration_bundle("dusty", 1, true).identity()
     );
     assert!(stable.into_loaded().diagnostic.is_none());
 
     let theme_revision = Cell::new(0_u8);
     let loads = Cell::new(0_usize);
     let (switched, fingerprint) = capture_consistent_configuration_bundle_with(
-        "dust",
+        "dusty",
         |_| {
             loads.set(loads.get() + 1);
             if loads.get() == 2 {
@@ -683,12 +683,12 @@ fn consistent_loader_retries_same_theme_changes_and_theme_source_switches() {
 fn consistent_loader_rejects_transient_captures_even_when_before_and_after_match() {
     let loads = Cell::new(0_usize);
     let result = capture_consistent_configuration_bundle_with(
-        "dust",
+        "dusty",
         |_| {
             loads.set(loads.get() + 1);
-            configuration_bundle("dust", 1, true)
+            configuration_bundle("dusty", 1, true)
         },
-        |_| configuration_bundle("dust", 0, true).identity(),
+        |_| configuration_bundle("dusty", 0, true).identity(),
     );
     assert!(
         result.is_err(),
@@ -706,24 +706,24 @@ fn consistent_loader_never_emits_discarded_malformed_or_stale_attempts() {
         let revision = Cell::new(0_u8);
         let loads = Cell::new(0_usize);
         let (bundle, fingerprint) = capture_consistent_configuration_bundle_with(
-            "dust",
+            "dusty",
             |_| {
                 loads.set(loads.get() + 1);
                 if loads.get() == 1 {
                     revision.set(1);
-                    configuration_bundle("dust", 0, !final_valid)
+                    configuration_bundle("dusty", 0, !final_valid)
                 } else {
-                    configuration_bundle("dust", revision.get(), final_valid)
+                    configuration_bundle("dusty", revision.get(), final_valid)
                 }
             },
-            |_| configuration_bundle("dust", revision.get(), final_valid).identity(),
+            |_| configuration_bundle("dusty", revision.get(), final_valid).identity(),
         )
         .expect("second complete source set is stable");
         assert_eq!(loads.get(), 2);
         assert_eq!(bundle.into_loaded().diagnostic.is_none(), final_valid);
         assert_eq!(
             fingerprint,
-            configuration_bundle("dust", 1, final_valid).identity()
+            configuration_bundle("dusty", 1, final_valid).identity()
         );
     }
 }
@@ -733,24 +733,24 @@ fn accepted_candidate_fingerprint_matches_all_four_loaded_surfaces() {
     let revision = Cell::new(0_u8);
     let loads = Cell::new(0_usize);
     let (bundle, fingerprint) = capture_consistent_configuration_bundle_with(
-        "dust",
+        "dusty",
         |_| {
             loads.set(loads.get() + 1);
             let snapshot = revision.get();
-            let bundle = configuration_bundle("dust", snapshot, true);
+            let bundle = configuration_bundle("dusty", snapshot, true);
             if loads.get() == 1 {
                 revision.set(1);
             }
             bundle
         },
-        |_| configuration_bundle("dust", revision.get(), true).identity(),
+        |_| configuration_bundle("dusty", revision.get(), true).identity(),
     )
     .expect("stable complete snapshot");
     assert_eq!(loads.get(), 2);
     assert_eq!(fingerprint, bundle.identity());
     assert_eq!(
         fingerprint,
-        configuration_bundle("dust", 1, true).identity()
+        configuration_bundle("dusty", 1, true).identity()
     );
     let candidate = bundle.into_loaded();
     assert!(candidate.diagnostic.is_none(), "{:?}", candidate.diagnostic);
@@ -819,7 +819,7 @@ fn installed_plugin_discovery_uses_and_verifies_activation_digests() {
             reproducible: false,
         };
         fs::write(
-            root.path().join("dust-packages.lock.json"),
+            root.path().join("dusty-packages.lock.json"),
             serde_json::to_vec(&lock).unwrap(),
         )
         .unwrap();
@@ -839,14 +839,14 @@ fn installed_plugin_discovery_uses_and_verifies_activation_digests() {
 #[cfg(unix)]
 #[test]
 fn user_directories_honor_xdg_overrides() {
-    if std::env::var_os("DUST_XDG_TEST_CHILD").is_some() {
+    if std::env::var_os("DUSTY_XDG_TEST_CHILD").is_some() {
         assert_eq!(
             crate::config::user_config_path(),
-            PathBuf::from("xdg-config/dust/config.toml")
+            PathBuf::from("xdg-config/dusty/config.toml")
         );
         assert_eq!(
             crate::config::user_state_directory(),
-            PathBuf::from("xdg-state/dust")
+            PathBuf::from("xdg-state/dusty")
         );
         return;
     }
@@ -855,9 +855,9 @@ fn user_directories_honor_xdg_overrides() {
             "--exact",
             "config::tests::user_directories_honor_xdg_overrides",
         ])
-        .env("DUST_XDG_TEST_CHILD", "1")
-        .env_remove("DUST_CONFIG_HOME")
-        .env_remove("DUST_STATE_HOME")
+        .env("DUSTY_XDG_TEST_CHILD", "1")
+        .env_remove("DUSTY_CONFIG_HOME")
+        .env_remove("DUSTY_STATE_HOME")
         .env("XDG_CONFIG_HOME", "xdg-config")
         .env("XDG_STATE_HOME", "xdg-state")
         .status()
@@ -871,13 +871,13 @@ fn configuration_worker_tracks_disk_sources_across_startup_and_acknowledgments()
     use std::time::Duration;
     use std::time::Instant;
 
-    if std::env::var_os("DUST_CONFIG_WORKER_TEST_CHILD").is_none() {
+    if std::env::var_os("DUSTY_CONFIG_WORKER_TEST_CHILD").is_none() {
         let root = tempdir().unwrap();
         let status = std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", "config::tests::configuration_worker_tracks_disk_sources_across_startup_and_acknowledgments", "--nocapture"])
-            .env("DUST_CONFIG_WORKER_TEST_CHILD", "1")
-            .env("DUST_CONFIG_HOME", root.path())
-            .env("DUST_STATE_HOME", root.path().join("state"))
+            .env("DUSTY_CONFIG_WORKER_TEST_CHILD", "1")
+            .env("DUSTY_CONFIG_HOME", root.path())
+            .env("DUSTY_STATE_HOME", root.path().join("state"))
             .status().unwrap();
         assert!(status.success());
         return;
@@ -940,7 +940,7 @@ fn configuration_worker_tracks_disk_sources_across_startup_and_acknowledgments()
     worker.verify_watch().unwrap();
     fs::write(
         &theme_path,
-        BUNDLED_THEME.replace("name = \"dust\"", "name = \"night\""),
+        BUNDLED_THEME.replace("name = \"dusty\"", "name = \"night\""),
     )
     .unwrap();
     assert_eq!(next(&worker).candidate.unwrap().theme.name, "night");
@@ -962,7 +962,7 @@ fn configuration_reads_reject_fifos_and_devices_without_blocking() {
         "keymaps.toml",
         "dashboard.toml",
         "theme.toml",
-        "dust-packages.lock.json",
+        "dusty-packages.lock.json",
     ] {
         let path = root.path().join(name);
         nix::unistd::mkfifo(&path, nix::sys::stat::Mode::S_IRUSR).unwrap();
@@ -1485,28 +1485,28 @@ fn highlight_groups_resolve_like_neovim() {
         Some(crate::config::ThemeColor::Indexed(140))
     );
 
-    let mut dust = crate::config::themes::bundled_named("dust").unwrap().theme;
-    assert!(dust.resolve("@missing.nonexistent").is_none());
+    let mut dusty = crate::config::themes::bundled_named("dusty").unwrap().theme;
+    assert!(dusty.resolve("@missing.nonexistent").is_none());
     assert_eq!(
-        dust.resolve("@function.custom.child"),
-        dust.resolve("@function")
+        dusty.resolve("@function.custom.child"),
+        dusty.resolve("@function")
     );
-    dust.highlights.insert(
+    dusty.highlights.insert(
         "@test.broken".into(),
         crate::config::HighlightDefinition {
             link: Some("@missing.nonexistent".into()),
             ..Default::default()
         },
     );
-    assert!(dust.resolve("@test.broken").is_none());
-    dust.highlights.insert(
+    assert!(dusty.resolve("@test.broken").is_none());
+    dusty.highlights.insert(
         "@function".into(),
         crate::config::HighlightDefinition {
             link: Some("@function.method".into()),
             ..Default::default()
         },
     );
-    dust.highlights.insert(
+    dusty.highlights.insert(
         "@function.method".into(),
         crate::config::HighlightDefinition {
             link: Some("@function".into()),
@@ -1515,17 +1515,17 @@ fn highlight_groups_resolve_like_neovim() {
     );
     // Nothing defines `@markup.heading.1`, so it takes `@markup.heading`, which Neovim links to `Title`.
     assert_eq!(
-        colour(&dust, "@markup.heading.1"),
+        colour(&dusty, "@markup.heading.1"),
         Some(crate::config::ThemeColor::Rgb(0x58, 0xa6, 0xff))
     );
     // A theme that leaves a token type out keeps tree-sitter's colour.
-    assert_eq!(dust.highlight(group("@lsp.type.derive")), None);
+    assert_eq!(dusty.highlight(group("@lsp.type.derive")), None);
     // Links that loop colour nothing.
-    assert_eq!(dust.highlight(Highlight::FUNCTION), None);
+    assert_eq!(dusty.highlight(Highlight::FUNCTION), None);
     // Groups without a background draw on the editor's.
     assert_eq!(
-        dust.highlight(Highlight::STRING).unwrap().background,
-        dust.styles.default.background
+        dusty.highlight(Highlight::STRING).unwrap().background,
+        dusty.styles.default.background
     );
 }
 
@@ -1534,7 +1534,7 @@ fn theme_defined_language_captures_are_selected_and_inherit_in_other_themes() {
     use crate::config::Highlight;
     use crate::language::syntax::SyntaxLanguage;
     use crate::language::syntax::highlight;
-    let fallback = crate::config::themes::bundled_named("dust").unwrap().theme;
+    let fallback = crate::config::themes::bundled_named("dusty").unwrap().theme;
     let expected = fallback.highlight(Highlight::FUNCTION).unwrap().clone();
     // Existing syntax spans must honor a theme loaded later without another edit.
     let spans = highlight(SyntaxLanguage::Rust, "fn custom() {}\n");
@@ -1776,7 +1776,7 @@ fn a_setting_is_changed_in_place_and_reset_removes_it_but_keeps_its_comments() {
     let plain = edited("[editor]\ntab_width = 4\n", "editor.tab_width", None);
     assert_eq!(plain, "");
     let file = tempdir().unwrap();
-    let path = file.path().join("dust").join("config.toml");
+    let path = file.path().join("dusty").join("config.toml");
     crate::config::write_user_setting(&path, "editor.tab_width", Some(toml::Value::Integer(2)))
         .unwrap();
     assert_eq!(
@@ -1925,14 +1925,14 @@ fn unknown_fields_under_dotted_task_names_preserve_valid_settings() {
 }
 
 #[test]
-fn installed_dust_overrides_and_saved_namesakes_keep_their_colours() {
+fn installed_dusty_overrides_and_saved_namesakes_keep_their_colours() {
     let mut installed = load_bundled_config().theme;
     installed.styles.default.foreground = crate::config::ThemeColor::Red;
     let theme_source = toml::to_string(&installed).unwrap();
-    let bundle = capture_configuration_bundle_with("dust", |path| {
+    let bundle = capture_configuration_bundle_with("dusty", |path| {
         captured(
             path.clone(),
-            if path.file_name().is_some_and(|name| name == "dust.toml") {
+            if path.file_name().is_some_and(|name| name == "dusty.toml") {
                 CapturedText::Text(theme_source.clone())
             } else {
                 CapturedText::Missing
@@ -1942,7 +1942,7 @@ fn installed_dust_overrides_and_saved_namesakes_keep_their_colours() {
     assert_eq!(bundle.into_loaded().theme, installed);
     let choice = crate::config::themes::ThemeChoice {
         theme: installed.clone(),
-        path: "/themes/dust.toml".into(),
+        path: "/themes/dusty.toml".into(),
     };
     let (reply, receiver) = std::sync::mpsc::sync_channel(1);
     crate::config::themes::discover(crate::config::themes::ThemeRead {

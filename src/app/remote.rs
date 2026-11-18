@@ -1,6 +1,6 @@
-//! Requests that reach the running Dust over its socket: files that programs in its
+//! Requests that reach the running Dusty over its socket: files that programs in its
 //! terminals ask it to open, such as lazygit's edit key, and subagents that agents start
-//! through `dust --agent-tools`.
+//! through `dusty --agent-tools`.
 
 use std::collections::BTreeMap;
 
@@ -12,16 +12,16 @@ use crate::remote::lazygit_config;
 use crate::windows::WindowPlacement;
 
 impl App {
-    /// Listen for `dust --remote` and tell terminals where to find this session. Without a
-    /// socket Dust still works; lazygit then opens files in its own configured editor.
+    /// Listen for `dusty --remote` and tell terminals where to find this session. Without a
+    /// socket Dusty still works; lazygit then opens files in its own configured editor.
     pub(in crate::app) fn start_remote_server(&mut self) {
         let directory = std::env::var_os("XDG_RUNTIME_DIR")
-            .map(|directory| std::path::PathBuf::from(directory).join("dust"))
+            .map(|directory| std::path::PathBuf::from(directory).join("dusty"))
             .unwrap_or_else(|| crate::config::user_state_directory().join("run"));
         let server = match RemoteServer::start(&directory) {
             Ok(server) => server,
             Err(error) => {
-                self.notify_message(format!("dust --remote is unavailable: {error}"), false);
+                self.notify_message(format!("dusty --remote is unavailable: {error}"), false);
                 return;
             }
         };
@@ -29,8 +29,8 @@ impl App {
             SERVER_VARIABLE.to_owned(),
             server.path().display().to_string(),
         )]);
-        if let Ok(dust) = std::env::current_exe()
-            && let Ok(files) = lazygit_config(&directory, &dust)
+        if let Ok(dusty) = std::env::current_exe()
+            && let Ok(files) = lazygit_config(&directory, &dusty)
         {
             environment.insert("LG_CONFIG_FILE".into(), files);
         }

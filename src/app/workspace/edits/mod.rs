@@ -377,7 +377,7 @@ impl WorkspaceEdits {
         let sources = sources.clone();
         let proposal = proposal.clone();
         let worker = std::thread::Builder::new()
-            .name("dust-workspace-edit".into())
+            .name("dusty-workspace-edit".into())
             .spawn(move || {
                 crate::app::workspace::edits::prepare_workspace_edit(
                     &editor,

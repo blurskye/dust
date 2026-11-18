@@ -1,7 +1,7 @@
 //! Real index assertions for the native Git screen's sidebar and diff selections.
-use dust::editor::input::{KeyCode, KeyEvent, Modifiers};
-use dust::git::screen::{GitScreen, ScreenOutcome};
-use dust::ui::{KeyInputKind, UiEvent};
+use dusty::editor::input::{KeyCode, KeyEvent, Modifiers};
+use dusty::git::screen::{GitScreen, ScreenOutcome};
+use dusty::ui::{KeyInputKind, UiEvent};
 use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -113,10 +113,10 @@ fn assert_submodule_status(screen: &mut GitScreen, marker: &str, code: &str) {
         let frame = screen.frame(width, height);
         let (_, y, _) = frame.cursor.expect("submodule cursor");
         assert_eq!(frame.grid.get(3, y).unwrap().symbol, marker);
-        let row_style = dust::ui::Style::Git {
-            role: dust::ui::GitRole::Text,
-            surface: dust::ui::GitSurface::Cursor,
-            emphasis: dust::ui::Emphasis::None,
+        let row_style = dusty::ui::Style::Git {
+            role: dusty::ui::GitRole::Text,
+            surface: dusty::ui::GitSurface::Cursor,
+            emphasis: dusty::ui::Emphasis::None,
         };
         for (column, expected) in code.chars().enumerate() {
             let cell = frame.grid.get(5 + column as u16, y).unwrap();
@@ -146,10 +146,10 @@ fn assert_submodule_status(screen: &mut GitScreen, marker: &str, code: &str) {
             .filter(|&x| {
                 frame.grid.get(x, 2).is_some_and(|cell| {
                     cell.style
-                        == dust::ui::Style::Git {
-                            role: dust::ui::GitRole::OnFocus,
-                            surface: dust::ui::GitSurface::ChipActive,
-                            emphasis: dust::ui::Emphasis::Bold,
+                        == dusty::ui::Style::Git {
+                            role: dusty::ui::GitRole::OnFocus,
+                            surface: dusty::ui::GitSurface::ChipActive,
+                            emphasis: dusty::ui::Emphasis::Bold,
                         }
                 })
             })
@@ -1321,7 +1321,7 @@ fn file_status_columns_and_filename_do_not_move_between_worktree_mixed_and_index
     // Fixed Changes row anatomy: `▸` cursor, a mark column
     // (`◐` when partly staged), the XY status letters, the file glyph, then the path.
     let assert_status = |screen: &mut GitScreen, marker: &str, code: &str| {
-        let cursor = dust::ui::GitSurface::Cursor;
+        let cursor = dusty::ui::GitSurface::Cursor;
         for (width, height) in [(64, 20), (100, 30), (190, 48)] {
             let frame = screen.frame(width, height);
             let (_, y, _) = frame.cursor.expect("file cursor");
@@ -1343,16 +1343,16 @@ fn file_status_columns_and_filename_do_not_move_between_worktree_mixed_and_index
                 );
                 if expected == 'M' {
                     let role = if column == 0 {
-                        dust::ui::GitRole::Added
+                        dusty::ui::GitRole::Added
                     } else {
-                        dust::ui::GitRole::Modified
+                        dusty::ui::GitRole::Modified
                     };
                     assert_eq!(
                         cell.style,
-                        dust::ui::Style::Git {
+                        dusty::ui::Style::Git {
                             role,
                             surface: cursor,
-                            emphasis: dust::ui::Emphasis::None,
+                            emphasis: dusty::ui::Emphasis::None,
                         },
                         "{width}×{height}: {code:?}"
                     );
@@ -1361,9 +1361,9 @@ fn file_status_columns_and_filename_do_not_move_between_worktree_mixed_and_index
             assert_eq!(frame.grid.get(6, y).unwrap().symbol, "◇");
             assert_eq!(frame.grid.get(7, y).unwrap().symbol, " ");
             let name_role = match code {
-                "M " => dust::ui::GitRole::Added,
-                "MM" => dust::ui::GitRole::Modified,
-                _ => dust::ui::GitRole::Text,
+                "M " => dusty::ui::GitRole::Added,
+                "MM" => dusty::ui::GitRole::Modified,
+                _ => dusty::ui::GitRole::Text,
             };
             for (column, expected) in "file.txt".chars().enumerate() {
                 let cell = frame.grid.get(8 + column as u16, y).unwrap();
@@ -1374,10 +1374,10 @@ fn file_status_columns_and_filename_do_not_move_between_worktree_mixed_and_index
                 );
                 assert_eq!(
                     cell.style,
-                    dust::ui::Style::Git {
+                    dusty::ui::Style::Git {
                         role: name_role,
                         surface: cursor,
-                        emphasis: dust::ui::Emphasis::None,
+                        emphasis: dusty::ui::Emphasis::None,
                     }
                 );
             }

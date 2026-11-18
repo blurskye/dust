@@ -213,7 +213,7 @@ impl World {
             .env("XDG_DATA_HOME", home.join(".local/share"))
             .env("XDG_STATE_HOME", home.join(".local/state"))
             .env("XDG_CACHE_HOME", home.join(".cache"))
-            .env("DUST_CONFIG_HOME", self.directory.path().join("config"))
+            .env("DUSTY_CONFIG_HOME", self.directory.path().join("config"))
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .env("GIT_TERMINAL_PROMPT", "0");
     }

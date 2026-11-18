@@ -1,6 +1,6 @@
 //! Writes show at once and roll back when the forge refuses them.
 #![cfg(unix)]
-use dust::editor::input::KeyCode;
+use dusty::editor::input::KeyCode;
 
 #[path = "support/forge_fake.rs"]
 mod forge_fake;

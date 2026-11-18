@@ -1,12 +1,12 @@
-# Dust themes
+# Dusty themes
 
-Dust is the original, unchanged default palette. The chooser displays friendly
+Dusty is the original, unchanged default palette. The chooser displays friendly
 names; `[ui].theme` uses the file stem below. All themes ship in the binary and
 work with `--clean`, without downloads or plugins.
 
 | Display name | Configuration name |
 | --- | --- |
-| Dust | `dust` |
+| Dusty | `dusty` |
 | Catppuccin Latte (light) | `catppuccin-latte` |
 | Catppuccin Frappé | `catppuccin-frappe` |
 | Catppuccin Macchiato | `catppuccin-macchiato` |
@@ -21,7 +21,7 @@ work with `--clean`, without downloads or plugins.
 | Rosé Pine Moon | `rose-pine-moon` |
 | Rosé Pine Dawn (light) | `rose-pine-dawn` |
 
-Each file has two parts. `[styles]` colours Dust's own surfaces (panels, status
+Each file has two parts. `[styles]` colours Dusty's own surfaces (panels, status
 line, explorer) with explicit truecolor, xterm-256 and ANSI-16 fallbacks.
 `[highlights]` colours code with Neovim's highlight groups, in the shape
 `nvim_set_hl` takes: `"@function" = { fg = "#7aa2f7" }`, `"@lsp.type.property" =
@@ -38,7 +38,7 @@ To port a Neovim colorscheme, dump its groups and paste them under `[highlights]
       -l scripts/nvim-highlights.lua <colorscheme> [dark|light]
 
 The bundled `[highlights]` tables were dumped this way from the plugins below;
-Dust runs no Lua.
+Dusty runs no Lua.
 
 ## Palette sources and licenses
 
@@ -56,7 +56,7 @@ Dust runs no Lua.
 - **Tokyo Night**, folke/tokyonight.nvim contributors, Apache-2.0:
   [generated palette data at cdc07ac78467a233fd62c493de29a17e0cf2b2b6](https://github.com/folke/tokyonight.nvim/tree/cdc07ac78467a233fd62c493de29a17e0cf2b2b6/extras/helix).
   The `[palette]` tables of `tokyonight_{night,storm,moon,day}.toml` are adapted
-  to Dust roles; no Lua is executed. [License](../../LICENSES/Apache-2.0.txt).
+  to Dusty roles; no Lua is executed. [License](../../LICENSES/Apache-2.0.txt).
 - **Rosé Pine**, copyright (c) mvllow, MIT:
   [palette.json at 92af52b465ab6e47437aca223c9b8d3009a2023b](https://github.com/rose-pine/rose-pine-palette/blob/92af52b465ab6e47437aca223c9b8d3009a2023b/palette.json).
   [License](../../LICENSES/MIT-rose-pine.txt).
@@ -67,10 +67,10 @@ Highlights come from these Neovim plugins, under their own licenses:
 [rose-pine/neovim at ff48305](https://github.com/rose-pine/neovim/tree/ff483051a47e27d84bdef47703538df1ed9f4a47) (MIT, [license](../../LICENSES/MIT-rose-pine-nvim.txt)),
 [gruvbox.nvim at 154eb5f](https://github.com/ellisonleao/gruvbox.nvim/tree/154eb5ff5b96d0641307113fa385eaf0d36d9796) (MIT, [license](../../LICENSES/MIT-gruvbox.txt)) and
 [gbprod/nord.nvim at 87394d4](https://github.com/gbprod/nord.nvim/tree/87394d4fc35c901bbe38326a78d31ab1ead826b6) (WTFPL, [license](../../LICENSES/WTFPL-nord-nvim.txt)).
-The Dust theme's `[highlights]` are its own.
+The Dusty theme's `[highlights]` are its own.
 
-Dust plugins do **not yet** have a theme-contribution API. To add a custom theme
-today, place a Dust-format TOML file beside user configuration in `themes/`.
+Dusty plugins do **not yet** have a theme-contribution API. To add a custom theme
+today, place a Dusty-format TOML file beside user configuration in `themes/`.
 Neovim theme plugins don't run directly; dump their groups as above. Palette fetching for these
 bundled ports happened during development; opening the chooser makes no network
 request and does not install code.

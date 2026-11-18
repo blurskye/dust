@@ -1,7 +1,7 @@
 //! A named navigation mode with its own cursor, keys and statusline segment.
 // SPDX-License-Identifier: Apache-2.0
 wit_bindgen::generate!({ path: "../../../wit", world: "editor-plugin" });
-use dust::plugin::host;
+use dusty::plugin::host;
 
 struct Review;
 fn empty() -> host::CommandValue {

@@ -2,7 +2,7 @@ from greet import hello, shout
 
 
 def main():
-    name = "Dust"
+    name = "Dusty"
     message = hello(name)
     print(message)
     unused = 42

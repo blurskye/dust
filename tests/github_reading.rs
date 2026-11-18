@@ -1,9 +1,9 @@
 #![cfg(unix)]
 //! Issue reading regressions: display reflow must not become source editing or
 //! metadata readiness, and native focus must not change the selected scope.
-use dust::editor::input::{KeyCode, KeyEvent, Modifiers};
-use dust::git::screen::GitScreen;
-use dust::ui::{Frame, KeyInputKind, UiEvent};
+use dusty::editor::input::{KeyCode, KeyEvent, Modifiers};
+use dusty::git::screen::GitScreen;
+use dusty::ui::{Frame, KeyInputKind, UiEvent};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -44,7 +44,7 @@ fn view(screen: &mut GitScreen) -> String {
     text(&screen.frame(190, 65))
 }
 fn state_path() -> PathBuf {
-    std::env::var_os("DUST_GITHUB_FIXTURE").unwrap().into()
+    std::env::var_os("DUSTY_GITHUB_FIXTURE").unwrap().into()
 }
 /// The fake forge server's request log in the gh-CLI form the legacy fixture logged.
 fn calls() -> Vec<Vec<String>> {
@@ -82,7 +82,7 @@ fn release(name: &str) {
     std::fs::write(format!("{}.{}", state_path().display(), name), "release").unwrap();
 }
 fn fixture_child(name: &str) -> bool {
-    if std::env::var_os("DUST_GITHUB_READING_CHILD").is_some() {
+    if std::env::var_os("DUSTY_GITHUB_READING_CHILD").is_some() {
         return false;
     }
     let owner = tempfile::tempdir().unwrap();
@@ -101,12 +101,12 @@ fn fixture_child(name: &str) -> bool {
     let output = server
         .configure(&mut Command::new(std::env::current_exe().unwrap()))
         .args(["--exact", name, "--nocapture"])
-        .env("DUST_GITHUB_READING_CHILD", "1")
+        .env("DUSTY_GITHUB_READING_CHILD", "1")
         // `wait_timeline` takes the timeline's request as the sign that the item read before
         // it finished: true of the screen's one-lane mode, which these tests pin.
         .env("DUSTY_FORGE_LANES", "1")
-        .env("DUST_GITHUB_FIXTURE", &state)
-        .env("DUST_GITHUB_ROOT", &root)
+        .env("DUSTY_GITHUB_FIXTURE", &state)
+        .env("DUSTY_GITHUB_ROOT", &root)
         .env(
             "PATH",
             format!("{}:{}", bin.display(), std::env::var("PATH").unwrap()),
@@ -124,7 +124,7 @@ fn fixture_child(name: &str) -> bool {
 fn open(state: Value) -> GitScreen {
     std::fs::write(state_path(), state.to_string()).unwrap();
     let mut screen =
-        GitScreen::open(Path::new(&std::env::var("DUST_GITHUB_ROOT").unwrap())).unwrap();
+        GitScreen::open(Path::new(&std::env::var("DUSTY_GITHUB_ROOT").unwrap())).unwrap();
     // Issues is the third top tab: Git → Pull requests → Issues.
     key(&mut screen, KeyCode::Char('>'));
     key(&mut screen, KeyCode::Char('>'));
@@ -163,7 +163,7 @@ fn assert_read_only() {
 
 #[test]
 fn logical_markdown_distinguishes_prose_from_independently_wide_literal_rows() {
-    use dust::ui::markdown::{Styled, render_logical};
+    use dusty::ui::markdown::{Styled, render_logical};
     let code = format!("\tlet value = \"**{}**\";", "x".repeat(160));
     let diagram = format!("    left ----{}---- right `literal`", "-".repeat(130));
     let table = format!("| cell | {} |", "wide".repeat(35));
@@ -464,7 +464,7 @@ fn issue_reading_focus_round_trips_scope_native_cursor_scroll_and_drafts() {
         reads,
         "focus/render/draft restoration cannot refetch or mutate"
     );
-    let root = PathBuf::from(std::env::var_os("DUST_GITHUB_ROOT").unwrap());
+    let root = PathBuf::from(std::env::var_os("DUSTY_GITHUB_ROOT").unwrap());
     assert_eq!(
         std::fs::read_to_string(root.join("untouched.txt")).unwrap(),
         "local content\n"

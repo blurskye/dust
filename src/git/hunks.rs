@@ -393,7 +393,7 @@ impl GitHunkWorker {
         let worker = Arc::clone(&cancellation);
         let (tx, rx) = mpsc::sync_channel(1);
         thread::Builder::new()
-            .name(format!("dust-git-hunk-{}", request_id.0))
+            .name(format!("dusty-git-hunk-{}", request_id.0))
             .spawn(move || {
                 let result = match input {
                     Some(input) => read_buffer_hunks_owned(request_id, &policy, input, &worker),

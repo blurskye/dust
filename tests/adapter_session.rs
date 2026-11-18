@@ -39,30 +39,30 @@ fn an_adapter_child_is_killed_and_reaped_on_assertion_failure() {
 }
 
 #[test]
-fn an_adapter_started_through_dust_leads_its_own_session() {
+fn an_adapter_started_through_dusty_leads_its_own_session() {
     let script = "import os; print(os.getsid(0) == os.getpid())";
-    let output = Command::new(env!("CARGO_BIN_EXE_dust"))
+    let output = Command::new(env!("CARGO_BIN_EXE_dusty"))
         .args([
-            dust::debugger::ADAPTER_SESSION_ARGUMENT,
+            dusty::debugger::ADAPTER_SESSION_ARGUMENT,
             "python3",
             "-c",
             script,
         ])
         .output()
-        .expect("run dust");
+        .expect("run dusty");
     assert!(output.status.success(), "{output:?}");
     assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "True");
 }
 
 #[test]
 fn a_missing_adapter_is_a_failure_rather_than_the_editor_starting() {
-    let output = Command::new(env!("CARGO_BIN_EXE_dust"))
+    let output = Command::new(env!("CARGO_BIN_EXE_dusty"))
         .args([
-            dust::debugger::ADAPTER_SESSION_ARGUMENT,
+            dusty::debugger::ADAPTER_SESSION_ARGUMENT,
             "/nonexistent/adapter",
         ])
         .output()
-        .expect("run dust");
+        .expect("run dusty");
     assert!(!output.status.success());
 }
 
@@ -87,9 +87,9 @@ with socket.create_connection((host, int(port)), timeout=5) as s:
     s.sendall(request.upper())
 "#;
     let mut bridge = AdapterChild(
-        Command::new(env!("CARGO_BIN_EXE_dust"))
+        Command::new(env!("CARGO_BIN_EXE_dusty"))
             .args([
-                dust::debugger::ADAPTER_BRIDGE_ARGUMENT,
+                dusty::debugger::ADAPTER_BRIDGE_ARGUMENT,
                 "python3",
                 "-c",
                 script,
@@ -98,7 +98,7 @@ with socket.create_connection((host, int(port)), timeout=5) as s:
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .spawn()
-            .expect("run dust"),
+            .expect("run dusty"),
     );
     let deadline = Instant::now() + Duration::from_secs(20);
     let mut stdin = bridge.0.stdin.take().expect("stdin");

@@ -433,7 +433,7 @@ pub struct DashboardWorkspace {
     pub recent_files: Vec<DashboardFile>,
     /// The workspace's changed files, or `None` outside a Git repository.
     pub changes: Option<DashboardChanges>,
-    /// This workspace first, then other projects Dust has opened.
+    /// This workspace first, then other projects Dusty has opened.
     pub projects: Vec<DashboardProject>,
     /// The last commit's subject and when it was made, such as `3h ago`.
     pub last_commit: Option<(String, String)>,
@@ -499,7 +499,7 @@ pub struct ToolMenuRow {
     pub can_start: bool,
     pub can_install: bool,
     pub can_uninstall: bool,
-    /// The version this Dust release ships, when the Dust-installed copy is a different one.
+    /// The version this Dusty release ships, when the Dusty-installed copy is a different one.
     pub update: Option<String>,
 }
 

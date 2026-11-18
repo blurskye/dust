@@ -164,7 +164,7 @@ pub(super) struct LspSession {
     install_hinted: HashSet<String>,
     /// The last unhealthy status each server reported, so a repeated report isn't shown again.
     statuses: HashMap<String, String>,
-    /// Servers whose toolchain Dust already tried to repair this run.
+    /// Servers whose toolchain Dusty already tried to repair this run.
     repaired: HashSet<String>,
     /// Servers a person stopped; opening a file doesn't start them until asked again.
     stopped: HashSet<String>,
@@ -3886,7 +3886,7 @@ impl App {
             LspRuntimeSource::Managed => {
                 let Some(executable) = self.selected_managed_executable(&base_definition) else {
                     self.show_error(format!(
-                        "{} Dust-download version {} is not installed; press i to install it",
+                        "{} Dusty-download version {} is not installed; press i to install it",
                         definition.name,
                         definition.version.as_deref().unwrap_or("unknown")
                     ));
@@ -3903,16 +3903,16 @@ impl App {
                     self.configuration.settings().lsp.nix_workspace_fallback,
                     is_nixos_host(),
                 ) else {
-                    self.show_error("Dust via Nix is unavailable on this host");
+                    self.show_error("Dusty via Nix is unavailable on this host");
                     return;
                 };
                 if !nix_lsp_profile_installed(&definition) {
-                    self.show_error("Dust via Nix is not installed; press i to install it");
+                    self.show_error("Dusty via Nix is not installed; press i to install it");
                     return;
                 }
                 let Some(executable) = self.selected_managed_executable(&base_definition) else {
                     self.show_error(format!(
-                        "{} Dust via Nix version {} is not installed; press i",
+                        "{} Dusty via Nix version {} is not installed; press i",
                         definition.name,
                         definition.version.as_deref().unwrap_or("unknown")
                     ));

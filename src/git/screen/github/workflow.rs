@@ -1,4 +1,4 @@
-//! Read workflow-dispatch fields with Dust's YAML grammar.
+//! Read workflow-dispatch fields with Dusty's YAML grammar.
 use tree_sitter::Node;
 
 pub(super) struct Input {

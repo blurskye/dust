@@ -21,9 +21,9 @@ mod forge_fake;
 #[path = "support/forge_world.rs"]
 mod forge_world;
 
-use dust::editor::input::{KeyCode, KeyEvent};
-use dust::git::screen::GitScreen;
-use dust::ui::{KeyInputKind, UiEvent};
+use dusty::editor::input::{KeyCode, KeyEvent};
+use dusty::git::screen::GitScreen;
+use dusty::ui::{KeyInputKind, UiEvent};
 use forge_world::{ALL, Forge, World};
 use serde_json::json;
 use std::path::{Path, PathBuf};

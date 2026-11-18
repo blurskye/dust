@@ -411,7 +411,7 @@ impl WorkspaceTrustWorker {
         let (request_sender, request_receiver) = mpsc::sync_channel(queue_capacity.max(1));
         let (event_sender, event_receiver) = mpsc::sync_channel(queue_capacity.max(1));
         thread::Builder::new()
-            .name("dust-workspace-trust".into())
+            .name("dusty-workspace-trust".into())
             .spawn(move || {
                 let mut previous = TrustDatabase::default();
                 while let Ok(request) = request_receiver.recv() {

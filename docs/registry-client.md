@@ -1,7 +1,7 @@
 # Official registry client contract
 
 The checked-out client recognizes one registry base:
-`https://dust.blurskye.dev/registry/v1`. The client never follows redirects,
+`https://dusty.blurskye.dev/registry/v1`. The client never follows redirects,
 uses no environment proxy, and rejects URLs escaping that exact HTTPS
 scheme/host/port/path prefix. Configurable mirrors are unsupported. This is an
 implemented client contract, not evidence that a public registry service or
@@ -76,7 +76,7 @@ integrity-checked object exists.
 ## Activation transaction
 
 Registry schema 1 embeds the current JSON package descriptor and schema-1
-plugin TOML model; it does not carry or imply `dust-package.toml` schema 2.
+plugin TOML model; it does not carry or imply `dusty-package.toml` schema 2.
 Exact current records and lock version 1 are documented in the
 [current SDK](plugin-sdk.md#current-package-and-lock-formats).
 

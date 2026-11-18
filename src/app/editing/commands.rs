@@ -21,7 +21,7 @@ pub(in crate::app) fn register_commands(
     register(
         registry,
         "editor.quit",
-        "Quit Dust",
+        "Quit Dusty",
         ContextRequirement::Application,
         ArgumentSchema::default().field("force", ArgumentType::Bool, true),
         |invocation| {

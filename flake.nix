@@ -1,5 +1,5 @@
 {
-  description = "Dust build environment";
+  description = "Dusty build environment";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/825e2028c29b702a4a5f085f08095d12099784f2";

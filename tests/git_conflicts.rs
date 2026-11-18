@@ -2,10 +2,10 @@
 //! pull stop in one place, label each hunk's sides, pick per hunk, count what is left and
 //! name the operation on continue, skip and abort. Temporary repositories and local bare
 //! remotes only.
-use dust::config::{GitKeys, load_bundled_config};
-use dust::editor::input::{KeyCode, KeyEvent, Modifiers};
-use dust::git::screen::{GitScreen, ScreenOutcome};
-use dust::ui::{KeyInputKind, UiEvent};
+use dusty::config::{GitKeys, load_bundled_config};
+use dusty::editor::input::{KeyCode, KeyEvent, Modifiers};
+use dusty::git::screen::{GitScreen, ScreenOutcome};
+use dusty::ui::{KeyInputKind, UiEvent};
 use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -681,7 +681,7 @@ fn the_tutor_conflicts_chapter_advances_on_real_picks() {
 }
 
 /// The cells from `from` to `to` (exclusive) on row `y`, one symbol each.
-fn cells(frame: &dust::ui::Frame, y: u16, from: u16, to: u16) -> String {
+fn cells(frame: &dusty::ui::Frame, y: u16, from: u16, to: u16) -> String {
     (from..to)
         .filter_map(|x| frame.grid.get(x, y))
         .map(|cell| cell.symbol.to_string())
@@ -689,7 +689,7 @@ fn cells(frame: &dust::ui::Frame, y: u16, from: u16, to: u16) -> String {
 }
 
 /// The box of the overlay titled `title`: its left, top, right and bottom edges.
-fn overlay(frame: &dust::ui::Frame, title: &str) -> Option<(u16, u16, u16, u16)> {
+fn overlay(frame: &dusty::ui::Frame, title: &str) -> Option<(u16, u16, u16, u16)> {
     let (width, height) = (frame.grid.width(), frame.grid.height());
     let symbol = |x: u16, y: u16| {
         frame
@@ -723,12 +723,12 @@ const BOX: &[&str] = &[
 /// the panes recede to the border colour around it, their text kept, never blanked.
 fn occludes(
     screen: &mut GitScreen,
-    plain: &dust::ui::Frame,
+    plain: &dusty::ui::Frame,
     width: u16,
     height: u16,
     title: &str,
 ) -> Result<(), String> {
-    use dust::ui::{GitRole, GitSurface, Style};
+    use dusty::ui::{GitRole, GitSurface, Style};
     let frame = screen.frame(width, height);
     let shown = (0..height)
         .map(|y| frame.grid.row_text(y))
@@ -781,7 +781,7 @@ fn occludes(
     Ok(())
 }
 
-fn text(frame: &dust::ui::Frame, height: u16) -> Vec<String> {
+fn text(frame: &dusty::ui::Frame, height: u16) -> Vec<String> {
     (0..height).map(|y| frame.grid.row_text(y)).collect()
 }
 

@@ -298,7 +298,7 @@ fn workspace_frame_respects_nonzero_compositor_origin_for_side_and_top_docks() {
 
 #[test]
 fn ordinary_confirmation_wraps_unicode_and_uses_safe_default_geometry() {
-    let state = EditorState::new(PathBuf::from("/tmp/dust-workspace"));
+    let state = EditorState::new(PathBuf::from("/tmp/dusty-workspace"));
     let loaded = crate::config::load_bundled_config();
     let mut prompt = PromptState::new(PromptKind::ExplorerDelete);
     prompt.confirmation = Some(crate::ui::ConfirmationState {
@@ -340,7 +340,7 @@ fn ordinary_confirmation_wraps_unicode_and_uses_safe_default_geometry() {
 
 #[test]
 fn confirmation_uses_custom_action_labels_for_geometry_and_paint() {
-    let state = EditorState::new(PathBuf::from("/tmp/dust-workspace"));
+    let state = EditorState::new(PathBuf::from("/tmp/dusty-workspace"));
     let loaded = crate::config::load_bundled_config();
     let mut prompt = PromptState::new(PromptKind::TerminalClose);
     prompt.confirmation = Some(crate::ui::ConfirmationState {
@@ -380,7 +380,7 @@ fn confirmation_uses_custom_action_labels_for_geometry_and_paint() {
 
 #[test]
 fn confirmation_visibility_uses_render_workspace_and_button_width() {
-    let mut state = EditorState::new(PathBuf::from("/tmp/dust-workspace"));
+    let mut state = EditorState::new(PathBuf::from("/tmp/dusty-workspace"));
     state
         .open_text(crate::editor::text::TextBuffer::from_text("x"), None)
         .unwrap();
@@ -430,7 +430,7 @@ fn confirmation_visibility_uses_render_workspace_and_button_width() {
 
 #[test]
 fn confirmation_fails_closed_when_the_full_target_cannot_be_shown() {
-    let state = EditorState::new(PathBuf::from("/tmp/dust-workspace"));
+    let state = EditorState::new(PathBuf::from("/tmp/dusty-workspace"));
     let loaded = crate::config::load_bundled_config();
     let mut prompt = PromptState::new(PromptKind::ExplorerDelete);
     prompt.confirmation = Some(crate::ui::ConfirmationState {
@@ -2229,7 +2229,7 @@ fn focused_diagnostic_expands_all_matching_messages_as_virtual_lines() {
 
 #[test]
 fn key_hints_anchor_clip_and_preserve_protected_rows() {
-    let state = EditorState::new(PathBuf::from("/tmp/dust-workspace"));
+    let state = EditorState::new(PathBuf::from("/tmp/dusty-workspace"));
     let loaded = crate::config::load_bundled_config();
     let config = loaded.config;
     let ui = UiState {

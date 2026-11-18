@@ -838,7 +838,7 @@ impl SyntaxWorker {
         let latest = Arc::new(Mutex::new(HashMap::new()));
         let worker = latest.clone();
         thread::Builder::new()
-            .name("dust-syntax".into())
+            .name("dusty-syntax".into())
             .spawn(move || {
                 while let Ok(request) = rx.recv() {
                     let _ = worker_slot.try_send(());
@@ -2470,7 +2470,7 @@ mod tests {
     }
     #[test]
     fn toml_values_keep_their_own_colour_next_to_keys() {
-        let source = "[package]\nname = \"dust\"\nversion = 2\n";
+        let source = "[package]\nname = \"dusty\"\nversion = 2\n";
         let spans = highlight(SyntaxLanguage::Toml, source);
         let role_at = |word: &str| {
             let at = source.find(word).expect(word);
@@ -2481,7 +2481,7 @@ mod tests {
         };
         assert_eq!(role_at("package"), Some("@keyword.toml"));
         assert_eq!(role_at("name"), Some("@type.toml"));
-        assert_eq!(role_at("\"dust\""), Some("@string.toml"));
+        assert_eq!(role_at("\"dusty\""), Some("@string.toml"));
         assert_eq!(role_at("2"), Some("@number.toml"));
     }
     #[test]

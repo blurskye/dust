@@ -231,7 +231,7 @@ pub(in crate::app) fn register_commands(
     register(
         registry,
         "terminal.yank",
-        "Yank terminal text into Dust registers",
+        "Yank terminal text into Dusty registers",
         ContextRequirement::Application,
         ArgumentSchema::default().field("line", ArgumentType::Bool, false),
         |invocation| {

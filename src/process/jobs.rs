@@ -119,7 +119,7 @@ impl JobSupervisor {
         let stop = Arc::new(AtomicBool::new(false));
         let closing = stop.clone();
         let worker = thread::Builder::new()
-            .name("dust-jobs".into())
+            .name("dusty-jobs".into())
             .spawn(move || {
                 let mut engine = JobEngine::new(event_capacity);
                 while !closing.load(Ordering::Acquire) {
@@ -510,7 +510,7 @@ impl JobEngine {
                 let cancelled = cancel.clone();
                 let lease = slot.clone();
                 thread::Builder::new()
-                    .name("dust-job-stdin".into())
+                    .name("dusty-job-stdin".into())
                     .spawn(move || {
                         let _lease = lease;
                         if stdin.write_all(&initial).is_err() {
@@ -537,7 +537,7 @@ impl JobEngine {
                 let cancelled = cancel.clone();
                 pending.fetch_add(1, Ordering::AcqRel);
                 thread::Builder::new()
-                    .name("dust-job-stdin".into())
+                    .name("dusty-job-stdin".into())
                     .spawn(move || {
                         let _lease = lease;
                         if stdin.write_all(&bytes).is_err() && !cancelled.load(Ordering::Acquire) {
@@ -719,7 +719,7 @@ fn stream_reader(
     let (readers, failed, slot, cancel) = completion;
     readers.fetch_add(1, Ordering::AcqRel);
     thread::Builder::new()
-        .name("dust-job-output".into())
+        .name("dusty-job-output".into())
         .spawn(move || {
             struct End(Arc<AtomicUsize>);
             impl Drop for End {

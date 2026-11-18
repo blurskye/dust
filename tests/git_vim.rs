@@ -1,8 +1,8 @@
 //! Dusty Git's vim modes, the editor's leader and the staging keys.
-use dust::config::{Config, GitKeys, load_bundled_config};
-use dust::editor::input::{KeyCode, KeyEvent, Modifiers};
-use dust::git::screen::{GitScreen, InputMode};
-use dust::ui::{KeyInputKind, UiEvent};
+use dusty::config::{Config, GitKeys, load_bundled_config};
+use dusty::editor::input::{KeyCode, KeyEvent, Modifiers};
+use dusty::git::screen::{GitScreen, InputMode};
+use dusty::ui::{KeyInputKind, UiEvent};
 use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -754,7 +754,7 @@ fn the_unread_badge_and_the_chip_leave_the_footer_keys_whole() {
             .env("XDG_DATA_HOME", home.join(".local/share"))
             .env("XDG_STATE_HOME", home.join(".local/state"))
             .env("XDG_CACHE_HOME", home.join(".cache"))
-            .env("DUST_CONFIG_HOME", directory.path().join("config"))
+            .env("DUSTY_CONFIG_HOME", directory.path().join("config"))
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .env("GIT_TERMINAL_PROMPT", "0");
         let output = command.output().unwrap();

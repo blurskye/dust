@@ -359,9 +359,9 @@ mod tests {
         assert_eq!(
             crate::app::configuration::themes::themes_directory(
                 Path::new("<bundled:config>"),
-                Path::new("/config/dust/config.toml")
+                Path::new("/config/dusty/config.toml")
             ),
-            PathBuf::from("/config/dust/themes")
+            PathBuf::from("/config/dusty/themes")
         );
         assert_eq!(
             crate::app::configuration::themes::themes_directory(

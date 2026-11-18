@@ -13,7 +13,7 @@ use crate::ui::render::composition_tests::render;
 
 #[test]
 fn notice_popup_shows_on_the_dashboard_without_a_cursor() {
-    let state = EditorState::new(PathBuf::from("/tmp/dust-workspace"));
+    let state = EditorState::new(PathBuf::from("/tmp/dusty-workspace"));
     let ui = UiState {
         documentation_popup: Some(DocumentationPopupState {
             kind: DocumentationPopupKind::Notice,
@@ -265,7 +265,7 @@ fn workspace_ui() -> UiState {
             recent_files: vec![
                 file("src/count.rs", None, "2m"),
                 file("README.md", None, "1h"),
-                file("src/lib.rs", Some("dust"), "3d"),
+                file("src/lib.rs", Some("dusty"), "3d"),
             ],
             changes: Some(DashboardChanges {
                 files: vec![
@@ -275,7 +275,7 @@ fn workspace_ui() -> UiState {
                 changed: 1,
                 untracked: 1,
             }),
-            projects: vec![project("tally", "master"), project("dust", "main")],
+            projects: vec![project("tally", "master"), project("dusty", "main")],
             last_commit: Some(("Count characters too".into(), "3h ago".into())),
         },
         ..UiState::default()
@@ -373,7 +373,7 @@ fn a_large_dashboard_shows_the_wordmark_beside_the_workspace_over_four_boxes() {
     assert_eq!(style(&frame, 11, 9), Style::Selection);
     assert_eq!(style(&frame, 4, 10), Style::Accent);
     assert_eq!(column(&rows[10], "2  README.md"), 4);
-    assert!(rows[11].contains("3  src/lib.rs  dust"), "{}", rows[11]);
+    assert!(rows[11].contains("3  src/lib.rs  dusty"), "{}", rows[11]);
     assert_eq!(style(&frame, 7, 11), Style::Muted);
     assert_eq!(style(&frame, 11, 11), Style::Default);
 
@@ -384,7 +384,7 @@ fn a_large_dashboard_shows_the_wordmark_beside_the_workspace_over_four_boxes() {
 
     assert_eq!(column(&rows[24], "tally"), 4);
     assert!(rows[24].contains("/work/tally"), "{}", rows[24]);
-    assert_eq!(column(&rows[25], "dust"), 4);
+    assert_eq!(column(&rows[25], "dusty"), 4);
     assert!(rows[25].contains("main │"), "{}", rows[25]);
 
     // The actions run in three columns, each key before its label.
@@ -409,12 +409,12 @@ fn an_80_by_24_dashboard_shows_one_header_line_recent_files_and_the_actions() {
     let (_, rows) = draw(&workspace_ui(), 80, 24);
     assert_eq!(
         rows[0].trim(),
-        format!("dust {} · tally · master", version())
+        format!("dusty {} · tally · master", version())
     );
     assert_eq!(column(&rows[2], "╭─ Recent files "), 2);
     assert_eq!(rows[2].trim_end().chars().count(), 78);
     assert_eq!(column(&rows[4], "1  src/count.rs"), 4);
-    assert!(rows[6].contains("3  src/lib.rs  dust"));
+    assert!(rows[6].contains("3  src/lib.rs  dusty"));
     let start = rows
         .iter()
         .position(|row| row.contains("─ Start "))
@@ -451,7 +451,11 @@ fn shorter_windows_drop_the_wordmark_before_the_boxes() {
     assert!(!rows.iter().any(|row| row.contains("██")), "{rows:#?}");
     assert!(rows[1].starts_with("    tally · "), "{}", rows[1]);
     assert!(rows[1].contains("master · 1 changed"), "{}", rows[1]);
-    assert!(rows[1].trim_end().ends_with(&format!("dust {}", version())));
+    assert!(
+        rows[1]
+            .trim_end()
+            .ends_with(&format!("dusty {}", version()))
+    );
     assert!(rows[3].contains("last commit Count characters too"));
     for title in ["Recent files", "Changes", "Projects", "Start"] {
         assert!(rows.iter().any(|row| row.contains(title)), "{rows:#?}");
@@ -485,7 +489,7 @@ fn the_selection_follows_the_focused_box_and_falls_back_when_it_is_hidden() {
     assert_eq!(style(&frame, 3, 25), Style::Selection);
     assert_ne!(style(&frame, 3, 24), Style::Selection);
     assert_ne!(style(&frame, 3, 9), Style::Selection);
-    assert_eq!(column(&rows[25], "dust"), 4);
+    assert_eq!(column(&rows[25], "dusty"), 4);
 
     // At 80x24 there is no projects box, so recent files hold the selection.
     let (frame, _) = draw(&ui, 80, 24);

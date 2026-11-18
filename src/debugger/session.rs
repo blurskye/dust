@@ -266,7 +266,7 @@ impl DapClient {
             .ok();
         let finish = actor.clone();
         thread::Builder::new()
-            .name(format!("dust-dap-{name}"))
+            .name(format!("dusty-dap-{name}"))
             .spawn(move || {
                 struct Finish(Arc<Actor>);
                 impl Drop for Finish {
@@ -487,7 +487,7 @@ impl Writer {
         let (sender, receiver) = mpsc::sync_channel::<(Value, Option<Arc<AtomicU8>>)>(CAPACITY);
         let actor = events.actor.clone();
         let worker = thread::Builder::new()
-            .name("dust-dap-writer".into())
+            .name("dusty-dap-writer".into())
             .spawn(move || {
                 let _resident = events;
                 while !_resident.actor.cancel.load(Ordering::Acquire) {

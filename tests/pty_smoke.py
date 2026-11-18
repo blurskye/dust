@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Linux/macOS PTY smoke tests for Dust's real terminal lifecycle and editing."""
+"""Linux/macOS PTY smoke tests for Dusty's real terminal lifecycle and editing."""
 
 from __future__ import annotations
 
@@ -68,7 +68,7 @@ def set_size(descriptor: int, rows: int, columns: int) -> None:
 
 def remember_workspace_without_trusting(cwd: str, workspace: pathlib.Path) -> None:
     root = workspace.resolve()
-    state = pathlib.Path(cwd) / ".dust-state"
+    state = pathlib.Path(cwd) / ".dusty-state"
     target = state / "trusted-workspaces.toml"
     encoded_root = json.dumps(str(root))
     existing = target.read_text(encoding="utf-8") if target.exists() else ""
@@ -119,10 +119,10 @@ def run(
     if pid == 0:
         os.chdir(cwd)
         os.environ["TERM"] = "xterm-256color"
-        os.environ["DUST_CONFIG_HOME"] = str(
-            config_home or pathlib.Path(cwd) / ".dust-missing-config"
+        os.environ["DUSTY_CONFIG_HOME"] = str(
+            config_home or pathlib.Path(cwd) / ".dusty-missing-config"
         )
-        os.environ["DUST_STATE_HOME"] = str(pathlib.Path(cwd) / ".dust-state")
+        os.environ["DUSTY_STATE_HOME"] = str(pathlib.Path(cwd) / ".dusty-state")
         # Terminals run a plain sh: a user's bashrc prompt may set the window title,
         # which the docked terminal shows in place of its own.
         os.environ["SHELL"] = "/bin/sh"
@@ -140,8 +140,8 @@ def run(
     answered = 0
 
     def read() -> None:
-        # Answer the device attributes query Dust sends at startup, as a terminal without the
-        # kitty keyboard protocol does; unanswered, Dust waits two seconds for a reply.
+        # Answer the device attributes query Dusty sends at startup, as a terminal without the
+        # kitty keyboard protocol does; unanswered, Dusty waits two seconds for a reply.
         nonlocal answered
         output.extend(os.read(descriptor, 65536))
         queries = bytes(output).count(b"\x1b[c")
@@ -163,7 +163,7 @@ def run(
         os.kill(pid, signal.SIGKILL)
         os.waitpid(pid, 0)
         os.close(descriptor)
-        raise AssertionError("Dust did not paint its first frame within five seconds")
+        raise AssertionError("Dusty did not paint its first frame within five seconds")
 
     for stage_index, (delay, data, size) in enumerate(stages):
         deadline = time.time() + delay
@@ -220,7 +220,7 @@ def run(
         os.kill(pid, 9)
         os.waitpid(pid, 0)
         raise AssertionError(
-            "Dust did not exit within five seconds; final terminal screen:\n"
+            "Dusty did not exit within five seconds; final terminal screen:\n"
             + terminal_screen(bytes(output))
         )
     return os.waitstatus_to_exitcode(status), bytes(output), snapshots
@@ -333,7 +333,7 @@ def confirmation_smoke(binary: pathlib.Path) -> None:
         return "".join(wrapped).rstrip()
 
     def target_run(choice: bytes) -> tuple[pathlib.Path, bytes, list[bytes]]:
-        directory = tempfile.mkdtemp(prefix="dust-confirmation-")
+        directory = tempfile.mkdtemp(prefix="dusty-confirmation-")
         root = pathlib.Path(directory)
         target = root / "owned  target.txt"
         target.write_text("owned\n", encoding="utf-8")
@@ -372,7 +372,7 @@ def confirmation_smoke(binary: pathlib.Path) -> None:
     assert not yes_target.exists(), "explicit Yes must delete the original target"
     shutil.rmtree(yes_target.parent)
 
-    with tempfile.TemporaryDirectory(prefix="dust-confirmation-small-") as directory:
+    with tempfile.TemporaryDirectory(prefix="dusty-confirmation-small-") as directory:
         root = pathlib.Path(directory)
         target = root / "small target.txt"
         target.write_text("owned\n", encoding="utf-8")
@@ -407,12 +407,12 @@ def confirmation_smoke(binary: pathlib.Path) -> None:
         assert not target.exists(), "Yes must work after the complete target becomes visible"
         assert_restored(output)
 
-    print("Dust owned confirmation PTY tests passed")
+    print("Dusty owned confirmation PTY tests passed")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--binary", type=pathlib.Path, default=pathlib.Path("target/debug/dust"))
+    parser.add_argument("--binary", type=pathlib.Path, default=pathlib.Path("target/debug/dusty"))
     parser.add_argument(
         "--confirmation-only",
         action="store_true",
@@ -421,7 +421,7 @@ def main() -> None:
     arguments = parser.parse_args()
     binary = arguments.binary.resolve()
     if not binary.is_file():
-        raise SystemExit(f"Dust binary does not exist: {binary}; run `cargo build`")
+        raise SystemExit(f"Dusty binary does not exist: {binary}; run `cargo build`")
     if arguments.confirmation_only:
         confirmation_smoke(binary)
         return
@@ -439,7 +439,7 @@ def main() -> None:
         assert "Do you want to trust this workspace?" in first_open
         assert "LSP servers" in first_open
         assert "[[seen]]" in (
-            pathlib.Path(directory) / ".dust-state" / "trusted-workspaces.toml"
+            pathlib.Path(directory) / ".dusty-state" / "trusted-workspaces.toml"
         ).read_text(encoding="utf-8")
         assert_restored(output)
 
@@ -533,15 +533,15 @@ def main() -> None:
             assert "rustup bundled" in runtime_screen
             assert "Rust 1." not in runtime_screen
         if is_nixos_host():
-            assert "Dust (Nix)" in runtime_screen
-            assert not re.search(r"\bDust\s+not installed", runtime_screen)
+            assert "Dusty (Nix)" in runtime_screen
+            assert not re.search(r"\bDusty\s+not installed", runtime_screen)
             assert "0.3.3025" in runtime_screen and "2026-08-24" in runtime_screen
             assert "0.3.3016" in runtime_screen and "2026-08-17.4" in runtime_screen
             assert "0.3.3008" in runtime_screen and "2026-08-10.1" in runtime_screen
             assert "0.3.2660" not in runtime_screen
         else:
-            assert re.search(r"\bDust\s+not installed", runtime_screen)
-            assert "Dust (Nix)" not in runtime_screen
+            assert re.search(r"\bDusty\s+not installed", runtime_screen)
+            assert "Dusty (Nix)" not in runtime_screen
             assert "0.3.3025" in runtime_screen and "2026-08-24" in runtime_screen
             assert "0.3.3016" in runtime_screen and "2026-08-17.4" in runtime_screen
             assert "0.3.3008" in runtime_screen and "2026-08-10.1" in runtime_screen
@@ -1241,7 +1241,7 @@ exit 1
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             (root / "Cargo.toml").write_text(
-                "[package]\nname = \"dust-pty-lsp\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+                "[package]\nname = \"dusty-pty-lsp\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
                 encoding="utf-8",
             )
             path = root / "main.rs"
@@ -1265,7 +1265,7 @@ exit 1
             "const value: number = 1;\n",
             "typescript-language-server",
             "package.json",
-            "{\"name\": \"dust-pty-lsp\", \"private\": true}\n",
+            "{\"name\": \"dusty-pty-lsp\", \"private\": true}\n",
         ),
         (
             "gopls",
@@ -1273,7 +1273,7 @@ exit 1
             "package main\nfunc main() {}\n",
             "gopls",
             "go.mod",
-            "module example.com/dust-pty-lsp\n\ngo 1.20\n",
+            "module example.com/dusty-pty-lsp\n\ngo 1.20\n",
         ),
     ]:
         if not shutil.which(executable):
@@ -1469,7 +1469,7 @@ exit 1
             [(0.2, b":health\r", None), (0.2, b":q\r", None)],
         )
         assert code == 0
-        assert "Dust health" in terminal_screen(snapshots[1])
+        assert "Dusty health" in terminal_screen(snapshots[1])
         assert_restored(output)
 
     with tempfile.TemporaryDirectory() as directory:
@@ -1743,8 +1743,8 @@ arguments = { force = false }
             encoding="utf-8",
         )
         repository = pathlib.Path(__file__).resolve().parents[1]
-        custom_theme = (repository / "assets/themes/dust.toml").read_text(encoding="utf-8")
-        custom_theme = custom_theme.replace('name = "dust"', 'name = "custom"')
+        custom_theme = (repository / "assets/themes/dusty.toml").read_text(encoding="utf-8")
+        custom_theme = custom_theme.replace('name = "dusty"', 'name = "custom"')
         custom_theme = custom_theme.replace(
             '[styles.accent]\nforeground = "#58a6ff"\nbackground = "#0d1117"\nforeground_256 = "indexed:75"',
             '[styles.accent]\nforeground = "indexed:201"\nbackground = "#0d1117"\nforeground_256 = "indexed:201"',
@@ -1810,8 +1810,8 @@ arguments = { force = false }
         themes = config_home / "themes"
         themes.mkdir()
         repository = pathlib.Path(__file__).resolve().parents[1]
-        watched_theme = (repository / "assets/themes/dust.toml").read_text(encoding="utf-8")
-        watched_theme = watched_theme.replace('name = "dust"', 'name = "watched"')
+        watched_theme = (repository / "assets/themes/dusty.toml").read_text(encoding="utf-8")
+        watched_theme = watched_theme.replace('name = "dusty"', 'name = "watched"')
         watched_theme = watched_theme.replace(
             '[styles.accent]\nforeground = "#58a6ff"\nbackground = "#0d1117"\nforeground_256 = "indexed:75"',
             '[styles.accent]\nforeground = "indexed:202"\nbackground = "#0d1117"\nforeground_256 = "indexed:202"',
@@ -1941,7 +1941,7 @@ arguments = { force = false }
         assert path.read_bytes() == b"Xabc\r\n"
         assert_restored(output)
 
-    print("Dust PTY smoke tests passed")
+    print("Dusty PTY smoke tests passed")
 
 
 if __name__ == "__main__":

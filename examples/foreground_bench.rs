@@ -1,9 +1,9 @@
 use std::{path::PathBuf, time::Instant};
 
-use dust::config::load_bundled_config;
-use dust::editor::EditorState;
-use dust::editor::text::TextBuffer;
-use dust::ui::{UiState, render};
+use dusty::config::load_bundled_config;
+use dusty::editor::EditorState;
+use dusty::editor::text::TextBuffer;
+use dusty::ui::{UiState, render};
 
 fn main() {
     const WIDTH: u16 = 120;
@@ -43,7 +43,7 @@ fn main() {
     let render_elapsed = render_start.elapsed();
     let average = render_elapsed / u32::try_from(ITERATIONS).expect("iteration count");
 
-    println!("dust_foreground_benchmark");
+    println!("dusty_foreground_benchmark");
     println!("target_os={}", std::env::consts::OS);
     println!("target_arch={}", std::env::consts::ARCH);
     println!(

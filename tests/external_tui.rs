@@ -1,22 +1,22 @@
-use dust::process::ExecutionPreflightEvent;
-use dust::process::ExecutionPreflightRequest;
-use dust::process::ExecutionPreflightWorker;
-use dust::process::PtyEvent;
-use dust::process::PtyId;
-use dust::process::PtyPolicy;
-use dust::process::PtyRequest;
-use dust::process::PtyWorker;
-use dust::ui::PtyInputKey;
-use dust::ui::PtyScreen;
-use dust::ui::encode_key;
-use dust::ui::encode_paste;
-use dust::windows::ContentAdapterKind;
-use dust::windows::ContentLifecycle;
-use dust::windows::ContentTypeId;
-use dust::windows::WindowError;
-use dust::windows::WindowGraph;
-use dust::windows::WindowPlacement;
-use dust::windows::WindowRect;
+use dusty::process::ExecutionPreflightEvent;
+use dusty::process::ExecutionPreflightRequest;
+use dusty::process::ExecutionPreflightWorker;
+use dusty::process::PtyEvent;
+use dusty::process::PtyId;
+use dusty::process::PtyPolicy;
+use dusty::process::PtyRequest;
+use dusty::process::PtyWorker;
+use dusty::ui::PtyInputKey;
+use dusty::ui::PtyScreen;
+use dusty::ui::encode_key;
+use dusty::ui::encode_paste;
+use dusty::windows::ContentAdapterKind;
+use dusty::windows::ContentLifecycle;
+use dusty::windows::ContentTypeId;
+use dusty::windows::WindowError;
+use dusty::windows::WindowGraph;
+use dusty::windows::WindowPlacement;
+use dusty::windows::WindowRect;
 use std::collections::BTreeMap;
 use std::io::Read;
 use std::io::Write;
@@ -30,7 +30,7 @@ use std::time::Instant;
 fn wait_for_preflight(
     preflight: &ExecutionPreflightWorker,
     deadline: Instant,
-) -> dust::process::ExecutionPreflightResult {
+) -> dusty::process::ExecutionPreflightResult {
     loop {
         if let Some(event) = preflight.poll().unwrap().into_iter().next() {
             match event {
@@ -47,7 +47,7 @@ fn wait_for_preflight(
 #[ignore = "operator probe: requires NixOS LazyGit absolute path"]
 fn lazygit_version_uses_canonical_preflight_and_portable_pty_without_shell() {
     let executable = PathBuf::from("/run/current-system/sw/bin/lazygit");
-    let cwd = dust::files::canonicalize(std::env::temp_dir()).unwrap();
+    let cwd = dusty::files::canonicalize(std::env::temp_dir()).unwrap();
     let deadline = Instant::now() + Duration::from_secs(5);
     let mut preflight = ExecutionPreflightWorker::start(2);
     preflight
@@ -127,12 +127,12 @@ fn lazygit_launch_resize_and_quit_uses_preflight_pty() {
     index.add_path(std::path::Path::new("file.txt")).unwrap();
     index.write().unwrap();
     let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
-    let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+    let sig = git2::Signature::now("Dusty", "dusty@example.invalid").unwrap();
     repo.commit(Some("HEAD"), &sig, &sig, "fixture", &tree, &[])
         .unwrap();
     drop(tree);
     let executable = PathBuf::from("/run/current-system/sw/bin/lazygit");
-    let cwd = dust::files::canonicalize(dir.path()).unwrap();
+    let cwd = dusty::files::canonicalize(dir.path()).unwrap();
     let deadline = Instant::now() + Duration::from_secs(5);
     let mut preflight = ExecutionPreflightWorker::start(2);
     preflight
@@ -230,7 +230,7 @@ fn lazygit_launch_resize_and_quit_uses_preflight_pty() {
 
 #[test]
 fn external_tui_fixture() {
-    if std::env::var("DUST_TEST_EXTERNAL_TUI_FIXTURE").as_deref() != Ok("1") {
+    if std::env::var("DUSTY_TEST_EXTERNAL_TUI_FIXTURE").as_deref() != Ok("1") {
         return;
     }
     crossterm::terminal::enable_raw_mode().unwrap();
@@ -260,13 +260,13 @@ fn external_tui_fixture() {
 
 #[test]
 fn production_binary_ignores_external_tui_fixture_environment() {
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_dust"))
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_dusty"))
         .arg("--version")
-        .env("DUST_TEST_EXTERNAL_TUI_FIXTURE", "1")
+        .env("DUSTY_TEST_EXTERNAL_TUI_FIXTURE", "1")
         .output()
         .unwrap();
     assert!(output.status.success());
-    assert!(String::from_utf8_lossy(&output.stdout).starts_with("dust "));
+    assert!(String::from_utf8_lossy(&output.stdout).starts_with("dusty "));
     assert!(!output.stdout.contains(&0x1b));
 }
 
@@ -276,8 +276,8 @@ fn production_binary_ignores_external_tui_fixture_environment() {
     ignore = "ConPTY redraws the screen itself and does not pass the child's terminal modes or VT key input through"
 )]
 fn canonical_preflight_portable_pty_drives_external_tui_fixture_without_shell() {
-    let executable = dust::files::canonicalize(std::env::current_exe().unwrap()).unwrap();
-    let cwd = dust::files::canonicalize(std::env::temp_dir()).unwrap();
+    let executable = dusty::files::canonicalize(std::env::current_exe().unwrap()).unwrap();
+    let cwd = dusty::files::canonicalize(std::env::temp_dir()).unwrap();
     let mut preflight = ExecutionPreflightWorker::start(2);
     preflight
         .request(ExecutionPreflightRequest {
@@ -290,7 +290,7 @@ fn canonical_preflight_portable_pty_drives_external_tui_fixture_without_shell() 
     let deadline = Instant::now() + Duration::from_secs(5);
     let ready = wait_for_preflight(&preflight, deadline);
     let mut environment = BTreeMap::new();
-    environment.insert("DUST_TEST_EXTERNAL_TUI_FIXTURE".into(), "1".into());
+    environment.insert("DUSTY_TEST_EXTERNAL_TUI_FIXTURE".into(), "1".into());
     environment.insert("TERM".into(), "xterm-256color".into());
     let mut ptys = PtyWorker::start(16);
     let id = ptys
@@ -503,11 +503,11 @@ fn pty_resize_ack_precedes_the_childs_resize_output() {
         },
     };
     request.program =
-        dust::tools::discover_executable("python3").expect("PTY resize fixture needs Python 3");
+        dusty::tools::discover_executable("python3").expect("PTY resize fixture needs Python 3");
     request.arguments = vec![script.as_os_str().to_owned()];
     let id = service.open(request).unwrap();
     let deadline = Instant::now() + Duration::from_secs(20);
-    let mut screen = dust::ui::PtyScreen::new(80, 8, 8);
+    let mut screen = dusty::ui::PtyScreen::new(80, 8, 8);
     while !screen.lines().iter().any(|line| line.contains("READY")) {
         for event in service.poll().unwrap() {
             if let PtyEvent::Output { bytes, .. } = event {

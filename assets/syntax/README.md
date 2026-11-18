@@ -1,7 +1,7 @@
 # Bundled syntax assets
 
 These queries are compiled only with the pinned grammar crates in `Cargo.lock`.
-Highlight queries originate from the corresponding upstream grammar release; TypeScript composes the JavaScript base (excluding JSX nodes) with the TypeScript extension, while TSX composes the JavaScript/JSX base with that extension. Fold/indent queries are Dust-maintained. Upstream grammar/query assets are MIT
+Highlight queries originate from the corresponding upstream grammar release; TypeScript composes the JavaScript base (excluding JSX nodes) with the TypeScript extension, while TSX composes the JavaScript/JSX base with that extension. Fold/indent queries are Dusty-maintained. Upstream grammar/query assets are MIT
 licensed unless noted:
 
 - tree-sitter-rust 0.24.0
@@ -48,4 +48,4 @@ The other grammars use their upstream highlight query as is; C++ and Vue put the
 queries they build on first. tree-sitter-elixir and tree-sitter-ini are Apache-2.0 licensed.
 
 See each crate's packaged license and repository metadata in Cargo.lock/SBOM.
-Dust never loads query or parser code from a project or plugin.
+Dusty never loads query or parser code from a project or plugin.

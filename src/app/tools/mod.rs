@@ -67,8 +67,8 @@ impl LspRuntimeSource {
     pub(in crate::app) const fn label(self) -> &'static str {
         match self {
             Self::Path => "PATH",
-            Self::Managed => "Dust",
-            Self::Nix => "Dust (Nix)",
+            Self::Managed => "Dusty",
+            Self::Nix => "Dusty (Nix)",
         }
     }
 }
@@ -867,7 +867,7 @@ mod tests {
             } else {
                 vec![marker.into()]
             };
-            definition.executable = format!("dust-test-missing-{id}");
+            definition.executable = format!("dusty-test-missing-{id}");
             app.tooling.fixture_insert(ToolEntry {
                 definition,
                 status: ToolStatus::Available,
@@ -919,7 +919,7 @@ mod tests {
         app.tooling.fixture_retain(|_| false);
         let mut definition = crate::tools::bundled_tool_catalog().remove(0);
         definition.id = "test-rust".into();
-        definition.executable = "dust-test-missing-server".into();
+        definition.executable = "dusty-test-missing-server".into();
         app.tooling.fixture_insert(ToolEntry {
             definition,
             status: ToolStatus::Available,
@@ -1563,9 +1563,9 @@ impl App {
             } else if let Some(error) = path_error {
                 error
             } else if path_version_reported {
-                format!("Found on PATH ({path_version}). Dust never changes or removes it.")
+                format!("Found on PATH ({path_version}). Dusty never changes or removes it.")
             } else {
-                "Found on PATH. Dust never changes or removes it.".into()
+                "Found on PATH. Dusty never changes or removes it.".into()
             },
             selected: selected_source == LspRuntimeSource::Path,
             installed: path_usable,
@@ -1618,9 +1618,9 @@ impl App {
                     .into(),
                     note: probe_error.unwrap_or_else(|| {
                         if installed {
-                            format!("{} {version}, installed by Dust.", definition.name)
+                            format!("{} {version}, installed by Dusty.", definition.name)
                         } else {
-                            "A verified download from the Dust catalog.".to_owned()
+                            "A verified download from the Dusty catalog.".to_owned()
                         }
                     }),
                     selected: selected_source == LspRuntimeSource::Managed
@@ -1640,7 +1640,7 @@ impl App {
                     release: "none".into(),
                     location: "—".into(),
                     status: "unavailable".into(),
-                    note: "Dust has no download for this server.".into(),
+                    note: "Dusty has no download for this server.".into(),
                     selected: selected_source == LspRuntimeSource::Managed,
                     installed: false,
                     installable: false,
@@ -1697,11 +1697,11 @@ impl App {
                     note: probe_error.unwrap_or_else(|| {
                         if installed {
                             format!(
-                                "{} {version}, installed by Dust through Nix.",
+                                "{} {version}, installed by Dusty through Nix.",
                                 definition.name
                             )
                         } else {
-                            "Built through Nix from the Dust catalog.".to_owned()
+                            "Built through Nix from the Dusty catalog.".to_owned()
                         }
                     }),
                     selected: selected_source == LspRuntimeSource::Nix
@@ -1770,7 +1770,7 @@ impl App {
                         .any(|language| language.contains(&needle))
             })
             // A search reaches every known server, as Mason lists them all; without one the
-            // list keeps to servers that are installed or that Dust can install.
+            // list keeps to servers that are installed or that Dusty can install.
             .filter(|entry| {
                 !needle.is_empty()
                     || entry.definition.kind != ToolKind::Lsp
@@ -1893,7 +1893,7 @@ impl App {
                 } else {
                     managed.is_some()
                 };
-                // A Dust-installed copy older than the one this release ships can be updated.
+                // A Dusty-installed copy older than the one this release ships can be updated.
                 let installed_version = (installed && source != LspRuntimeSource::Path)
                     .then(|| crate::tools::managed_tool_installed_version(definition))
                     .flatten();
@@ -1957,28 +1957,28 @@ impl App {
                 } else if lifecycle == "blocked: untrusted" {
                     "Workspace is not trusted. Press t to review workspace trust before running tools.".into()
                 } else if lifecycle == "blocked: safe mode" {
-                    "Tools cannot run in safe mode. Restart Dust without --safe-mode to enable them.".into()
+                    "Tools cannot run in safe mode. Restart Dusty without --safe-mode to enable them.".into()
                 } else if matches!(entry.status, ToolStatus::Installing { .. }) {
                     format!("Installing {} {version}: {lifecycle}.", definition.name)
                 } else if installed {
                     match source {
                         LspRuntimeSource::Path => {
-                            "Found on PATH. Dust uses it as is and never removes it.".into()
+                            "Found on PATH. Dusty uses it as is and never removes it.".into()
                         }
                         LspRuntimeSource::Managed | LspRuntimeSource::Nix => {
                             let how = if source == LspRuntimeSource::Nix {
-                                "Installed by Dust through Nix"
+                                "Installed by Dusty through Nix"
                             } else {
-                                "Installed by Dust"
+                                "Installed by Dusty"
                             };
                             match (&update, &installed_version) {
                                 (Some(current), Some(installed)) => format!(
-                                    "{how}: {installed}. This Dust release ships {current}; \
+                                    "{how}: {installed}. This Dusty release ships {current}; \
                                      press i to update."
                                 ),
                                 _ => format!(
-                                    "{how}. This is the version this Dust release ships; \
-                                     a newer Dust brings newer tools."
+                                    "{how}. This is the version this Dusty release ships; \
+                                     a newer Dusty brings newer tools."
                                 ),
                             }
                         }
@@ -1986,7 +1986,7 @@ impl App {
                 } else if can_install {
                     format!("Not installed. Press i to install {version}.")
                 } else {
-                    "Dust has no installer for this tool. Install it with your package manager \
+                    "Dusty has no installer for this tool. Install it with your package manager \
                      so it is on PATH."
                         .into()
                 };
@@ -2305,7 +2305,7 @@ impl App {
         self.notify_message(
             match source {
                 LspRuntimeSource::Managed => format!(
-                    "{id} now uses Dust {}",
+                    "{id} now uses Dusty {}",
                     self.tooling
                         .managed_version(&id)
                         .map(String::as_str)
@@ -2445,7 +2445,7 @@ impl App {
                 }
             } else if definition.managed_versions().is_empty() {
                 self.show_error(format!(
-                    "{} is not installed and Dust has no installer for it",
+                    "{} is not installed and Dusty has no installer for it",
                     definition.name
                 ));
             } else {
@@ -2488,7 +2488,7 @@ impl App {
         }
         if definition.managed_versions().is_empty() {
             self.show_error(format!(
-                "{} is not installed and Dust has no installer for it",
+                "{} is not installed and Dusty has no installer for it",
                 definition.name
             ));
             return;
@@ -2559,7 +2559,7 @@ impl App {
 
 impl App {
     /// Shows a server's warning. When rust-analyzer can't run build scripts or proc macros
-    /// on a rustup toolchain, the toolchain usually lacks a component, so Dust adds the
+    /// on a rustup toolchain, the toolchain usually lacks a component, so Dusty adds the
     /// components once and restarts the server instead.
     pub(in crate::app) fn report_lsp_status(&mut self, key: &str, message: &str) {
         let Some(definition) = self
@@ -2658,9 +2658,9 @@ impl App {
             && !lsp_runtime_source_allowed_on_host(source, is_nixos_host())
         {
             self.show_error(if is_nixos_host() {
-                "NixOS language servers are installed only through Dust's private Nix compatibility runtime"
+                "NixOS language servers are installed only through Dusty's private Nix compatibility runtime"
             } else {
-                "non-NixOS language servers are installed only as verified Dust downloads"
+                "non-NixOS language servers are installed only as verified Dusty downloads"
             });
             return;
         }
@@ -2679,12 +2679,12 @@ impl App {
                 LspRuntimeSource::Path if rustup_install.is_none() => {
                     if discover_executable(&definition.executable).is_some() {
                         self.notify_message(format!(
-                            "{} is already installed on PATH; Dust leaves external software unchanged",
+                            "{} is already installed on PATH; Dusty leaves external software unchanged",
                             definition.name
                         ), false);
                     } else {
                         self.show_error(format!(
-                            "{} is not installed and has no Dust-managed build",
+                            "{} is not installed and has no Dusty-managed build",
                             definition.name
                         ));
                     }
@@ -2715,7 +2715,7 @@ impl App {
                         ) =>
                 {
                     self.notify_message(format!(
-                        "{} {} is already installed through Dust's Nix compatibility environment",
+                        "{} {} is already installed through Dusty's Nix compatibility environment",
                         definition.name,
                         definition.version.as_deref().unwrap_or("unknown")
                     ), false);
@@ -2748,11 +2748,11 @@ impl App {
             })
         } else if definition.kind == ToolKind::Lsp && source == LspRuntimeSource::Nix {
             let Some(nix) = discover_executable("nix") else {
-                self.show_error("Dust via Nix is unavailable: nix was not found");
+                self.show_error("Dusty via Nix is unavailable: nix was not found");
                 return;
             };
             if !self.nix_workspace_available_for(&definition) {
-                self.show_error("no verified upstream artifact or Dust Nix runtime is available for this language server");
+                self.show_error("no verified upstream artifact or Dusty Nix runtime is available for this language server");
                 return;
             }
             self.tooling
@@ -2831,14 +2831,14 @@ impl App {
             match source {
                 LspRuntimeSource::Path => {
                     self.notify_message(
-                    "This server is owned by PATH, not Dust; remove it with its package manager"
+                    "This server is owned by PATH, not Dusty; remove it with its package manager"
                         .into(), false);
                     return;
                 }
                 LspRuntimeSource::Managed => {
                     if !self.managed_variant_installed(&base_definition, &definition) {
                         self.show_error(format!(
-                            "Dust-download version {} is not installed",
+                            "Dusty-download version {} is not installed",
                             definition.version.as_deref().unwrap_or("unknown")
                         ));
                         return;
@@ -2853,7 +2853,7 @@ impl App {
                         || !self.managed_variant_installed(&base_definition, &definition)
                     {
                         self.show_error(format!(
-                            "Dust via Nix version {} is not installed",
+                            "Dusty via Nix version {} is not installed",
                             definition.version.as_deref().unwrap_or("unknown")
                         ));
                         return;
@@ -2931,7 +2931,7 @@ impl App {
 }
 
 impl App {
-    /// When rustup can't add rust-analyzer, install Dust's pinned standalone build instead, as
+    /// When rustup can't add rust-analyzer, install Dusty's pinned standalone build instead, as
     /// mason does, so automatic installs still end with a working server.
     fn install_rust_analyzer_download(&mut self, id: &str, diagnostic: &str) -> bool {
         if !self.configuration.settings().lsp.auto_install {
@@ -2966,7 +2966,7 @@ impl App {
         if installing {
             self.notify_message(
                 format!(
-                    "rustup could not add {} ({diagnostic}); installing Dust's build instead…",
+                    "rustup could not add {} ({diagnostic}); installing Dusty's build instead…",
                     definition.name
                 ),
                 false,
@@ -3018,16 +3018,16 @@ impl App {
                             format!("installed {name} in the active rustup toolchain")
                         }
                         ToolOperation::InstallManaged => {
-                            format!("installed {name} Dust download runtime")
+                            format!("installed {name} Dusty download runtime")
                         }
                         ToolOperation::InstallNix => {
-                            format!("installed {name} Dust via Nix runtime")
+                            format!("installed {name} Dusty via Nix runtime")
                         }
                         ToolOperation::UninstallManaged => {
-                            format!("uninstalled {name} Dust download runtime")
+                            format!("uninstalled {name} Dusty download runtime")
                         }
                         ToolOperation::UninstallNix => {
-                            format!("uninstalled {name} Dust via Nix runtime")
+                            format!("uninstalled {name} Dusty via Nix runtime")
                         }
                     },
                     false,

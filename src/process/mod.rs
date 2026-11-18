@@ -388,7 +388,7 @@ impl ExecutionPreflightWorker {
         let (tx, rx) = mpsc::sync_channel::<PreflightCommand>(capacity.clamp(1, 256));
         let (etx, erx) = mpsc::sync_channel(capacity.clamp(1, 256));
         thread::Builder::new()
-            .name("dust-execution-preflight".into())
+            .name("dusty-execution-preflight".into())
             .spawn(move || {
                 while let Ok(command) = rx.recv() {
                     let revision = command.request.root_revision;
@@ -691,7 +691,7 @@ impl<T: Write + Send + 'static> Write for CancellablePipe<T> {
             let (finished, results) = mpsc::sync_channel(1);
             let cancelled = self.cancelled.clone();
             thread::Builder::new()
-                .name("dust-pipe-writer".into())
+                .name("dusty-pipe-writer".into())
                 .spawn(move || {
                     for bytes in pending {
                         // A nonblocking socket reports a full send buffer as WouldBlock.

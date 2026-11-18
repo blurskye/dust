@@ -77,15 +77,15 @@ impl PackageStore {
             .truncate(false)
             .read(true)
             .write(true)
-            .open(self.root.join("dust-packages.lock"))
+            .open(self.root.join("dusty-packages.lock"))
             .map_err(PackageError::Io)?;
         crate::files::lock_exclusive(file, false).map_err(|(_, error)| PackageError::Io(error))
     }
     fn lock_path(&self) -> PathBuf {
-        self.root.join("dust-packages.lock.json")
+        self.root.join("dusty-packages.lock.json")
     }
     fn backup_path(&self) -> PathBuf {
-        self.root.join("dust-packages.lock.previous.json")
+        self.root.join("dusty-packages.lock.previous.json")
     }
     pub fn read_lock(&self) -> Result<PackageLock, PackageError> {
         let path = self.lock_path();
@@ -547,7 +547,7 @@ impl PackageWorker {
         let (tx, rx) = mpsc::sync_channel::<(u64, PackageOperation)>(capacity.clamp(1, 64));
         let (etx, erx) = mpsc::sync_channel(capacity.clamp(1, 64));
         thread::Builder::new()
-            .name("dust-packages".into())
+            .name("dusty-packages".into())
             .spawn(move || {
                 let mut prepared = BTreeMap::<u64, PreparedInstall>::new();
                 while let Ok((id, operation)) = rx.recv() {
@@ -1196,7 +1196,7 @@ pub(crate) fn installed_plugins(root: &Path) -> BTreeSet<String> {
             .ok()?;
         (bytes.len() <= 1024 * 1024).then_some(bytes)
     };
-    let Some(lock) = read(&root.join("dust-packages.lock.json"))
+    let Some(lock) = read(&root.join("dusty-packages.lock.json"))
         .and_then(|bytes| serde_json::from_slice::<crate::tools::PackageLock>(&bytes).ok())
     else {
         return BTreeSet::new();

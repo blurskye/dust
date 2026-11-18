@@ -101,7 +101,7 @@ impl App {
     }
 
     /// Gathers what the dashboard shows: the saved recent files, the last Git status, the
-    /// workspaces Dust has opened, and what the worker last read about them.
+    /// workspaces Dusty has opened, and what the worker last read about them.
     pub(in crate::app) fn sync_dashboard_ui(&mut self) {
         if !self.ui.dashboard && self.state.active_view().is_some() {
             return;
@@ -148,7 +148,7 @@ impl App {
             let (sender, receiver) = mpsc::channel();
             let read = read_for.clone();
             let started = std::thread::Builder::new()
-                .name("dust-dashboard".into())
+                .name("dusty-dashboard".into())
                 .spawn(move || {
                     let facts = read_git_facts(&read.root, &read.projects, &read.recent_files);
                     let _ = sender.send(facts);

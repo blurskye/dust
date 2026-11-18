@@ -1,14 +1,14 @@
-# The start screen: the DUST wordmark beside the workspace's name, branch, path and last
+# The start screen: the DUSTY wordmark beside the workspace's name, branch, path and last
 # commit, then boxes for recent files, changes, projects and these actions. A `logo` (a few
 # lines of block letters, say) replaces the wordmark; `identity` and the version start the
 # one-line header that smaller windows show instead.
 logo = ""
 show_identity = true
-identity = "dust"
+identity = "dusty"
 show_version = true
 version_format = "v{version}"
 show_path = true
-resize_message = "Dust — resize terminal"
+resize_message = "Dusty — resize terminal"
 content_width = 160
 minimum_width = 20
 minimum_height = 7

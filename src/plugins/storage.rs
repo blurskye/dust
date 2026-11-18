@@ -208,7 +208,7 @@ impl PluginStorageWorker {
         let loads = Arc::new(Mutex::new(BTreeMap::new()));
         let worker_loads = Arc::clone(&loads);
         thread::Builder::new()
-            .name("dust-plugin-storage".into())
+            .name("dusty-plugin-storage".into())
             .spawn(move || {
                 let mut temporary = 1_u64;
                 while let Ok(work) = requests.recv() {

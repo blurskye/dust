@@ -309,7 +309,7 @@ pub(super) fn lessons(language: Language) -> Result<Vec<Step>, String> {
 }
 
 /// The start of each practice project's temporary folder name.
-const PRACTICE_FOLDER_PREFIX: &str = "dust-tutor-";
+const PRACTICE_FOLDER_PREFIX: &str = "dusty-tutor-";
 
 /// Whether `path` is a tutor practice project or inside one. Practice projects are deleted
 /// when the tutor ends, so they are not the user's projects or recent files. Reads the file
@@ -346,13 +346,13 @@ fn create_practice_project(
     let repository = git2::Repository::init(folder.path())?;
     // Commits made in the lessons, such as finishing a merge, need a name to sign with.
     let mut config = repository.config()?;
-    config.set_str("user.name", "Dust tutor")?;
-    config.set_str("user.email", "tutor@dust.invalid")?;
+    config.set_str("user.name", "Dusty tutor")?;
+    config.set_str("user.email", "tutor@dusty.invalid")?;
     let mut index = repository.index()?;
     index.add_all(["*"], git2::IndexAddOption::DEFAULT, None)?;
     index.write()?;
     let tree = repository.find_tree(index.write_tree()?)?;
-    let signature = git2::Signature::now("Dust tutor", "tutor@dust.invalid")?;
+    let signature = git2::Signature::now("Dusty tutor", "tutor@dusty.invalid")?;
     repository.commit(
         Some("HEAD"),
         &signature,
@@ -377,7 +377,7 @@ fn start_practice_conflict(root: &Path) -> Result<(), Box<dyn std::error::Error>
         return Ok(());
     }
     let notes = Path::new("notes.txt");
-    let signature = git2::Signature::now("Dust tutor", "tutor@dust.invalid")?;
+    let signature = git2::Signature::now("Dusty tutor", "tutor@dusty.invalid")?;
     let head = repository.head()?.peel_to_commit()?;
     let original = repository
         .find_blob(head.tree()?.get_path(notes)?.id())?

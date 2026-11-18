@@ -237,7 +237,7 @@ pub struct ThemeStyles {
 
 /// A Neovim highlight group's definition, in the shape `nvim_set_hl` takes and
 /// `nvim_get_hl` returns, so a colorscheme's groups can be copied across as they are.
-/// Keys Dust doesn't use, such as `sp` or `blend`, are ignored.
+/// Keys Dusty doesn't use, such as `sp` or `blend`, are ignored.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct HighlightDefinition {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -761,11 +761,11 @@ impl ThemeConfig {
     fn resolve_git_colours(&self) -> GitColours {
         let styles = &self.styles;
         let base = styles.default.background;
-        // Dust's own theme gets the designed palette (as does a theme without truecolour, which
+        // Dusty's own theme gets the designed palette (as does a theme without truecolour, which
         // has nothing to blend); every other theme, dark or light, derives the roles from its
         // own styles, so Gruvbox reads as Gruvbox and a pale background never meets a
         // dark-theme pane.
-        let designed_palette = self.name == "dust" || luminance(base).is_none();
+        let designed_palette = self.name == "dusty" || luminance(base).is_none();
         let hex = |r, g, b| ThemeColor::Rgb(r, g, b);
         let pick = |configured: Option<ThemeColor>, designed: ThemeColor, derived: ThemeColor| {
             configured.unwrap_or(if designed_palette { designed } else { derived })
@@ -1117,7 +1117,7 @@ fn luminance(colour: ThemeColor) -> Option<f64> {
 /// Code in a forge reader's Markdown on `pane`: the editor's own code fill (`markdown_code`,
 /// `text` 8% over `editor`), so a fence reads as it does in the editor. Where that fill
 /// hardly differs from the pane (under half the lift it has over the editor's background,
-/// by WCAG contrast; Dust's designed pane sits right on it), the same 8% lift is taken over
+/// by WCAG contrast; Dusty's designed pane sits right on it), the same 8% lift is taken over
 /// the pane instead: the same look relative to what the code sits on.
 fn prose_code(text: ThemeColor, editor: ThemeColor, pane: ThemeColor) -> Option<ThemeColor> {
     let code = blend(text, editor, 8)?;

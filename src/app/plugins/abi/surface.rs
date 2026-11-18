@@ -8,7 +8,7 @@ use crate::app::picker::replacement::SelectRequest;
 use crate::app::prompt::replacement::InputRequest;
 use crate::app::windows::chrome::ChromeLine;
 use crate::editor::{BufferId, CommandAccess, CommandAuthority, CommandValue};
-use crate::plugins::component::component_api::dust::plugin::host as wit;
+use crate::plugins::component::component_api::dusty::plugin::host as wit;
 use crate::plugins::surface::SurfaceRequest;
 use slotmap::Key;
 use std::collections::{BTreeMap, BTreeSet};

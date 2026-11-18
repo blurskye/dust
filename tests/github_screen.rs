@@ -1,7 +1,7 @@
 #![cfg(unix)]
-use dust::editor::input::{KeyCode, KeyEvent, Modifiers};
-use dust::git::screen::GitScreen;
-use dust::ui::{Frame, KeyInputKind, Style, UiEvent};
+use dusty::editor::input::{KeyCode, KeyEvent, Modifiers};
+use dusty::git::screen::GitScreen;
+use dusty::ui::{Frame, KeyInputKind, Style, UiEvent};
 use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -131,7 +131,7 @@ fn activate(screen: &mut GitScreen, label: &str) {
 }
 /// The fake forge server's request log in the gh-CLI form the legacy fixture logged.
 fn calls() -> Vec<Vec<String>> {
-    forge_fake::calls(Path::new(&std::env::var("DUST_GITHUB_FIXTURE").unwrap()))
+    forge_fake::calls(Path::new(&std::env::var("DUSTY_GITHUB_FIXTURE").unwrap()))
 }
 fn is_call(args: &[String], prefix: &[&str]) -> bool {
     args.iter()
@@ -157,7 +157,11 @@ fn wait_call(screen: &mut GitScreen, predicate: impl Fn(&[String]) -> bool) {
 }
 fn release_read(name: &str) {
     std::fs::write(
-        format!("{}.{}", std::env::var("DUST_GITHUB_FIXTURE").unwrap(), name),
+        format!(
+            "{}.{}",
+            std::env::var("DUSTY_GITHUB_FIXTURE").unwrap(),
+            name
+        ),
         "release",
     )
     .unwrap();
@@ -181,7 +185,7 @@ fn git(root: &Path, args: &[&str]) {
 }
 
 fn fixture_child(name: &str) -> bool {
-    if std::env::var_os("DUST_GITHUB_CHILD").is_none() {
+    if std::env::var_os("DUSTY_GITHUB_CHILD").is_none() {
         let owner = tempfile::tempdir().unwrap();
         let bin = owner.path().join("bin");
         let state = owner.path().join("github.json");
@@ -206,13 +210,13 @@ fn fixture_child(name: &str) -> bool {
         let output = server
             .configure(&mut Command::new(std::env::current_exe().unwrap()))
             .args(["--exact", name, "--nocapture"])
-            .env("DUST_GITHUB_CHILD", "1")
+            .env("DUSTY_GITHUB_CHILD", "1")
             // These tests gate single reads and read the request log's order as the order
             // reads finished (one read at a time): the screen's one-lane mode. Reads side by
             // side are covered by `lanes.rs` and `forge_speed`.
             .env("DUSTY_FORGE_LANES", "1")
-            .env("DUST_GITHUB_FIXTURE", &state)
-            .env("DUST_GITHUB_ROOT", root)
+            .env("DUSTY_GITHUB_FIXTURE", &state)
+            .env("DUSTY_GITHUB_ROOT", root)
             .env(
                 "PATH",
                 format!("{}:{}", bin.display(), std::env::var("PATH").unwrap()),
@@ -235,10 +239,10 @@ fn native_github_controls_forms_reviews_and_workflow_logs() {
     if fixture_child("native_github_controls_forms_reviews_and_workflow_logs") {
         return;
     }
-    let state_path = std::env::var("DUST_GITHUB_FIXTURE").unwrap();
+    let state_path = std::env::var("DUSTY_GITHUB_FIXTURE").unwrap();
     std::fs::write(&state_path, r#"{"calls":[],"comments":[],"empty":true}"#).unwrap();
     let mut screen =
-        GitScreen::open(Path::new(&std::env::var("DUST_GITHUB_ROOT").unwrap())).unwrap();
+        GitScreen::open(Path::new(&std::env::var("DUSTY_GITHUB_ROOT").unwrap())).unwrap();
     goto(&mut screen, 0, 1);
     // One empty state, in the reader; the list keeps its count and a cursor.
     wait(&mut screen, "No issues match this view");
@@ -375,7 +379,7 @@ fn native_github_controls_forms_reviews_and_workflow_logs() {
         .unwrap();
     assert!(tabs <= 6, "PR tabs must not become a bulky pinned header");
     git(
-        Path::new(&std::env::var("DUST_GITHUB_ROOT").unwrap()),
+        Path::new(&std::env::var("DUSTY_GITHUB_ROOT").unwrap()),
         &["switch", "-c", "feature/native"],
     );
     // `n` walks the unresolved threads in the Conversation; from the list it opens a new
@@ -442,7 +446,7 @@ fn native_github_controls_forms_reviews_and_workflow_logs() {
             .iter()
             .any(|args| args.iter().any(|arg| arg.contains("markFileAsViewed")))
     );
-    screen = GitScreen::open(Path::new(&std::env::var("DUST_GITHUB_ROOT").unwrap())).unwrap();
+    screen = GitScreen::open(Path::new(&std::env::var("DUSTY_GITHUB_ROOT").unwrap())).unwrap();
     goto(&mut screen, 0, 2);
     wait(&mut screen, "into main from feature/native");
     for _ in 0..3 {
@@ -655,7 +659,7 @@ fn native_thread_replies_and_narrow_files_preserve_context_and_scoped_drafts() {
     if fixture_child("native_thread_replies_and_narrow_files_preserve_context_and_scoped_drafts") {
         return;
     }
-    let state_path = std::env::var("DUST_GITHUB_FIXTURE").unwrap();
+    let state_path = std::env::var("DUSTY_GITHUB_FIXTURE").unwrap();
     let comment = |author: &str, body: &str| {
         serde_json::json!({
             "author":{"login":author},"body":body,"path":"example.rs","line":1,"originalLine":1
@@ -681,7 +685,7 @@ fn native_thread_replies_and_narrow_files_preserve_context_and_scoped_drafts() {
     });
     std::fs::write(&state_path, fixture.to_string()).unwrap();
     let mut screen =
-        GitScreen::open(Path::new(&std::env::var("DUST_GITHUB_ROOT").unwrap())).unwrap();
+        GitScreen::open(Path::new(&std::env::var("DUSTY_GITHUB_ROOT").unwrap())).unwrap();
     goto(&mut screen, 0, 2);
     wait(&mut screen, "into main from feature/native");
     for _ in 0..3 {
@@ -859,7 +863,7 @@ fn github_closed_count_arrives_with_the_open_list() {
     if fixture_child("github_closed_count_arrives_with_the_open_list") {
         return;
     }
-    let state_path = std::env::var("DUST_GITHUB_FIXTURE").unwrap();
+    let state_path = std::env::var("DUSTY_GITHUB_FIXTURE").unwrap();
     std::fs::write(
         &state_path,
         serde_json::json!({
@@ -874,7 +878,7 @@ fn github_closed_count_arrives_with_the_open_list() {
     )
     .unwrap();
     let mut screen =
-        GitScreen::open(Path::new(&std::env::var("DUST_GITHUB_ROOT").unwrap())).unwrap();
+        GitScreen::open(Path::new(&std::env::var("DUSTY_GITHUB_ROOT").unwrap())).unwrap();
     goto(&mut screen, 0, 1);
     wait(&mut screen, "count fixture ready");
     // GitHub counts the closed side in the open list's own request: `1 Closed` before the
@@ -904,7 +908,7 @@ fn github_triage_queries_refresh_and_selection_are_native_and_scoped() {
     if fixture_child("github_triage_queries_refresh_and_selection_are_native_and_scoped") {
         return;
     }
-    let state_path = std::env::var("DUST_GITHUB_FIXTURE").unwrap();
+    let state_path = std::env::var("DUSTY_GITHUB_FIXTURE").unwrap();
     let first =
         serde_json::json!({"number":7,"title":"First issue","body":"First issue description."});
     let second =
@@ -923,7 +927,7 @@ fn github_triage_queries_refresh_and_selection_are_native_and_scoped() {
     });
     std::fs::write(&state_path, fixture.to_string()).unwrap();
     let mut screen =
-        GitScreen::open(Path::new(&std::env::var("DUST_GITHUB_ROOT").unwrap())).unwrap();
+        GitScreen::open(Path::new(&std::env::var("DUSTY_GITHUB_ROOT").unwrap())).unwrap();
     goto(&mut screen, 0, 1);
     wait(&mut screen, "triage fixture ready");
     key(&mut screen, KeyCode::Down);
@@ -1071,7 +1075,7 @@ fn rapid_github_navigation_reads_the_latest_target_before_skipped_items() {
     if fixture_child("rapid_github_navigation_reads_the_latest_target_before_skipped_items") {
         return;
     }
-    let state_path = std::env::var("DUST_GITHUB_FIXTURE").unwrap();
+    let state_path = std::env::var("DUSTY_GITHUB_FIXTURE").unwrap();
     std::fs::write(
         &state_path,
         serde_json::json!({
@@ -1085,7 +1089,7 @@ fn rapid_github_navigation_reads_the_latest_target_before_skipped_items() {
     )
     .unwrap();
     let mut screen =
-        GitScreen::open(Path::new(&std::env::var("DUST_GITHUB_ROOT").unwrap())).unwrap();
+        GitScreen::open(Path::new(&std::env::var("DUSTY_GITHUB_ROOT").unwrap())).unwrap();
     goto(&mut screen, 0, 1);
     wait(&mut screen, "Navigation activity ready");
     key(&mut screen, KeyCode::Char('j'));
@@ -1220,7 +1224,7 @@ fn github_find_prompt_keeps_keyboard_input_when_metadata_and_discussion_arrive()
     {
         return;
     }
-    let state_path = std::env::var("DUST_GITHUB_FIXTURE").unwrap();
+    let state_path = std::env::var("DUSTY_GITHUB_FIXTURE").unwrap();
     std::fs::write(&state_path, serde_json::json!({
         "calls":[],"comments":["Discussion arrived while finding."],
         "issues":[{"number":7,"title":"Loading find target","body":"## Background\n\n**Rebase onto base branch** stays in this description."}],
@@ -1228,7 +1232,7 @@ fn github_find_prompt_keeps_keyboard_input_when_metadata_and_discussion_arrive()
                       {"contains":"issues/7/timeline","name":"input-discussion"}]
     }).to_string()).unwrap();
     let mut screen =
-        GitScreen::open(Path::new(&std::env::var("DUST_GITHUB_ROOT").unwrap())).unwrap();
+        GitScreen::open(Path::new(&std::env::var("DUSTY_GITHUB_ROOT").unwrap())).unwrap();
     goto(&mut screen, 0, 1);
     wait_call(&mut screen, |args| is_call(args, &["issue", "view", "7"]));
     control(&mut screen, KeyCode::Char('f'));
@@ -1282,7 +1286,7 @@ fn github_find_replaced_source_keeps_the_query_and_finds_in_the_fresh_text() {
     if fixture_child("github_find_replaced_source_keeps_the_query_and_finds_in_the_fresh_text") {
         return;
     }
-    let state_path = std::env::var("DUST_GITHUB_FIXTURE").unwrap();
+    let state_path = std::env::var("DUSTY_GITHUB_FIXTURE").unwrap();
     std::fs::write(
         &state_path,
         serde_json::json!({
@@ -1293,7 +1297,7 @@ fn github_find_replaced_source_keeps_the_query_and_finds_in_the_fresh_text() {
     )
     .unwrap();
     let mut screen =
-        GitScreen::open(Path::new(&std::env::var("DUST_GITHUB_ROOT").unwrap())).unwrap();
+        GitScreen::open(Path::new(&std::env::var("DUSTY_GITHUB_ROOT").unwrap())).unwrap();
     goto(&mut screen, 0, 1);
     wait(&mut screen, "Initial discussion is fully loaded.");
     let mut fixture: serde_json::Value =
@@ -1333,14 +1337,14 @@ fn github_warm_list_find_and_cancel_survive_unchanged_detail_completion() {
     if fixture_child("github_warm_list_find_and_cancel_survive_unchanged_detail_completion") {
         return;
     }
-    let state_path = std::env::var("DUST_GITHUB_FIXTURE").unwrap();
+    let state_path = std::env::var("DUSTY_GITHUB_FIXTURE").unwrap();
     std::fs::write(&state_path, serde_json::json!({
         "calls":[],"comments":[],
         "issues":[{"number":7,"title":"Warm identity","body":"### warm **needle** first `needle` second.\n_Unchanged description._"}],
         "read_gates":[{"prefix":["issue","view","7"],"name":"find-details"}]
     }).to_string()).unwrap();
     let mut screen =
-        GitScreen::open(Path::new(&std::env::var("DUST_GITHUB_ROOT").unwrap())).unwrap();
+        GitScreen::open(Path::new(&std::env::var("DUSTY_GITHUB_ROOT").unwrap())).unwrap();
     goto(&mut screen, 0, 1);
     wait_call(&mut screen, |args| is_call(args, &["issue", "view", "7"]));
     let pending = view(&mut screen);
@@ -1403,7 +1407,7 @@ fn github_pr_warm_description_keeps_tabs_find_and_metadata_separate() {
     if fixture_child("github_pr_warm_description_keeps_tabs_find_and_metadata_separate") {
         return;
     }
-    let state_path = std::env::var("DUST_GITHUB_FIXTURE").unwrap();
+    let state_path = std::env::var("DUSTY_GITHUB_FIXTURE").unwrap();
     std::fs::write(&state_path, serde_json::json!({
         "calls":[],"comments":[],
         "prs":[{"number":9,"title":"Warm PR identity","body":"PR warm needle before metadata.","reviews":[]}],
@@ -1411,7 +1415,7 @@ fn github_pr_warm_description_keeps_tabs_find_and_metadata_separate() {
                       {"contains":"issues/9/timeline","name":"pr-activity"}]
     }).to_string()).unwrap();
     let mut screen =
-        GitScreen::open(Path::new(&std::env::var("DUST_GITHUB_ROOT").unwrap())).unwrap();
+        GitScreen::open(Path::new(&std::env::var("DUSTY_GITHUB_ROOT").unwrap())).unwrap();
     goto(&mut screen, 0, 2);
     wait_call(&mut screen, |args| is_call(args, &["pr", "view", "9"]));
     let pending = view(&mut screen);
@@ -1488,7 +1492,7 @@ fn github_warm_list_query_state_and_page_changes_never_reuse_unrelated_prose() {
     if fixture_child("github_warm_list_query_state_and_page_changes_never_reuse_unrelated_prose") {
         return;
     }
-    let state_path = std::env::var("DUST_GITHUB_FIXTURE").unwrap();
+    let state_path = std::env::var("DUSTY_GITHUB_FIXTURE").unwrap();
     std::fs::write(&state_path, serde_json::json!({
         "calls":[],"comments":[],
         "issues":[{"number":7,"title":"Inbox identity","body":"Inbox list prose."},
@@ -1498,7 +1502,7 @@ fn github_warm_list_query_state_and_page_changes_never_reuse_unrelated_prose() {
                       {"prefix":["issue","view","8"],"name":"assigned-details"}]
     }).to_string()).unwrap();
     let mut screen =
-        GitScreen::open(Path::new(&std::env::var("DUST_GITHUB_ROOT").unwrap())).unwrap();
+        GitScreen::open(Path::new(&std::env::var("DUSTY_GITHUB_ROOT").unwrap())).unwrap();
     goto(&mut screen, 0, 1);
     wait_call(&mut screen, |args| is_call(args, &["issue", "view", "7"]));
     assert!(view(&mut screen).contains("Inbox list prose."));
@@ -1540,7 +1544,7 @@ fn github_warm_list_empty_missing_and_failed_details_are_truthful_and_scoped() {
     if fixture_child("github_warm_list_empty_missing_and_failed_details_are_truthful_and_scoped") {
         return;
     }
-    let state_path = std::env::var("DUST_GITHUB_FIXTURE").unwrap();
+    let state_path = std::env::var("DUSTY_GITHUB_FIXTURE").unwrap();
     // Reopening with the same item number under another repository/host must
     // never borrow a previous workspace's summary or full metadata.
     for (name, host, repo, body, missing, fail) in [
@@ -1575,7 +1579,7 @@ fn github_warm_list_empty_missing_and_failed_details_are_truthful_and_scoped() {
         )
         .unwrap();
         let mut screen =
-            GitScreen::open(Path::new(&std::env::var("DUST_GITHUB_ROOT").unwrap())).unwrap();
+            GitScreen::open(Path::new(&std::env::var("DUSTY_GITHUB_ROOT").unwrap())).unwrap();
         goto(&mut screen, 0, 1);
         wait_call(&mut screen, |args| is_call(args, &["issue", "view", "7"]));
         let pending = view(&mut screen);
@@ -1641,7 +1645,7 @@ fn github_commit_tab_requeues_pruned_source_and_preserves_it_on_refresh_error() 
     if fixture_child("github_commit_tab_requeues_pruned_source_and_preserves_it_on_refresh_error") {
         return;
     }
-    let state_path = std::env::var("DUST_GITHUB_FIXTURE").unwrap();
+    let state_path = std::env::var("DUSTY_GITHUB_FIXTURE").unwrap();
     std::fs::write(
         &state_path,
         serde_json::json!({
@@ -1652,7 +1656,7 @@ fn github_commit_tab_requeues_pruned_source_and_preserves_it_on_refresh_error() 
     )
     .unwrap();
     let mut screen =
-        GitScreen::open(Path::new(&std::env::var("DUST_GITHUB_ROOT").unwrap())).unwrap();
+        GitScreen::open(Path::new(&std::env::var("DUSTY_GITHUB_ROOT").unwrap())).unwrap();
     goto(&mut screen, 0, 2);
     wait_call(&mut screen, |args| {
         args.iter().any(|arg| arg.contains("issues/9/timeline"))
@@ -1712,7 +1716,7 @@ fn queued_github_write_survives_navigation_and_clears_only_its_own_draft() {
     if fixture_child("queued_github_write_survives_navigation_and_clears_only_its_own_draft") {
         return;
     }
-    let state_path = std::env::var("DUST_GITHUB_FIXTURE").unwrap();
+    let state_path = std::env::var("DUSTY_GITHUB_FIXTURE").unwrap();
     std::fs::write(
         &state_path,
         serde_json::json!({
@@ -1724,7 +1728,7 @@ fn queued_github_write_survives_navigation_and_clears_only_its_own_draft() {
     )
     .unwrap();
     let mut screen =
-        GitScreen::open(Path::new(&std::env::var("DUST_GITHUB_ROOT").unwrap())).unwrap();
+        GitScreen::open(Path::new(&std::env::var("DUSTY_GITHUB_ROOT").unwrap())).unwrap();
     goto(&mut screen, 0, 1);
     wait(&mut screen, "Write fixture ready");
     key(&mut screen, KeyCode::Char('j'));
@@ -1818,7 +1822,7 @@ fn github_files_tabs_queries_and_views_reload_pruned_metadata_without_hiding_sou
     ) {
         return;
     }
-    let state_path = std::env::var("DUST_GITHUB_FIXTURE").unwrap();
+    let state_path = std::env::var("DUSTY_GITHUB_FIXTURE").unwrap();
     let diff = |body: &str| {
         format!(
             "diff --git a/example.rs b/example.rs\n--- /dev/null\n+++ b/example.rs\n@@ -0,0 +1 @@\n+fn {body}() {{}}\ndiff --git a/src/nested/other.rs b/src/nested/other.rs\n--- /dev/null\n+++ b/src/nested/other.rs\n@@ -0,0 +1 @@\n+fn selected_other_source() {{}}\n"
@@ -1844,7 +1848,7 @@ fn github_files_tabs_queries_and_views_reload_pruned_metadata_without_hiding_sou
         ]
     }).to_string()).unwrap();
     let mut screen =
-        GitScreen::open(Path::new(&std::env::var("DUST_GITHUB_ROOT").unwrap())).unwrap();
+        GitScreen::open(Path::new(&std::env::var("DUSTY_GITHUB_ROOT").unwrap())).unwrap();
     goto(&mut screen, 0, 2);
     wait_call(&mut screen, |args| {
         args.iter().any(|arg| arg.contains("issues/9/timeline"))
@@ -2022,9 +2026,9 @@ fn saved_github_views_round_trip_update_delete_and_restore_cached_identity() {
     if fixture_child("saved_github_views_round_trip_update_delete_and_restore_cached_identity") {
         return;
     }
-    let root_string = std::env::var("DUST_GITHUB_ROOT").unwrap();
+    let root_string = std::env::var("DUSTY_GITHUB_ROOT").unwrap();
     let root = Path::new(&root_string);
-    let state_path = std::env::var("DUST_GITHUB_FIXTURE").unwrap();
+    let state_path = std::env::var("DUSTY_GITHUB_FIXTURE").unwrap();
     let query = "label:\"needs triage\" assignee:@me";
     let updated_query = "label:bug sort:updated-desc";
     let first = serde_json::json!({"number":7,"title":"First closed issue","body":"First saved-view body.","state":"CLOSED"});
@@ -2219,9 +2223,9 @@ fn saved_github_views_isolate_host_repository_page_and_refuse_unsafe_local_write
     ) {
         return;
     }
-    let root_string = std::env::var("DUST_GITHUB_ROOT").unwrap();
+    let root_string = std::env::var("DUSTY_GITHUB_ROOT").unwrap();
     let root = Path::new(&root_string);
-    let state_path = std::env::var("DUST_GITHUB_FIXTURE").unwrap();
+    let state_path = std::env::var("DUSTY_GITHUB_FIXTURE").unwrap();
     for (host, repository, page, query) in [
         ("github.com", "example/demo", 1, "label:issue"),
         ("github.com", "example/demo", 2, "review-requested:@me"),
@@ -2396,7 +2400,7 @@ fn drawn_reader_left(frame: &Frame) -> u16 {
         .find(|&x| symbol(x - 1) == "╮" && symbol(x) == "╭")
         .unwrap_or(0)
 }
-fn assert_detail_style(frame: &Frame, text: &str, expected: dust::config::Highlight) {
+fn assert_detail_style(frame: &Frame, text: &str, expected: dusty::config::Highlight) {
     let left = drawn_reader_left(frame);
     for y in 2..frame.grid.height() - 2 {
         for x in left + 1..frame.grid.width() - 1 {
@@ -2417,9 +2421,9 @@ fn assert_detail_style(frame: &Frame, text: &str, expected: dust::config::Highli
 /// Whether a reader cell carries the semantic style of a Markdown highlight: headings and
 /// list marks in the accent, links in the link colour, code on the code surface's hue,
 /// quotes muted; fenced code keeps its syntax group. Any surface (the cursor row moves it).
-fn prose_style(style: Style, expected: dust::config::Highlight) -> bool {
-    use dust::config::Highlight;
-    use dust::ui::{Emphasis, GitRole};
+fn prose_style(style: Style, expected: dusty::config::Highlight) -> bool {
+    use dusty::config::Highlight;
+    use dusty::ui::{Emphasis, GitRole};
     let want = if expected == Highlight::HEADING {
         Some((GitRole::Focus, Emphasis::Bold))
     } else if expected == Highlight::KEYWORD {
@@ -2550,8 +2554,8 @@ fn github_markdown_prose_styles_visible_find_and_raw_drafts_preserve_local_git()
     {
         return;
     }
-    use dust::config::Highlight;
-    let root = std::path::PathBuf::from(std::env::var("DUST_GITHUB_ROOT").unwrap());
+    use dusty::config::Highlight;
+    let root = std::path::PathBuf::from(std::env::var("DUSTY_GITHUB_ROOT").unwrap());
     let local = root.join("local.txt");
     std::fs::write(&local, "staged content\n").unwrap();
     git(&root, &["add", "local.txt"]);
@@ -2559,7 +2563,7 @@ fn github_markdown_prose_styles_visible_find_and_raw_drafts_preserve_local_git()
     let index = std::fs::read(root.join(".git/index")).unwrap();
     let raw = "### Readable heading\nSome **bold text**, _italic text_, `inline code` and [docs label](https://hidden.test/target).\n> quoted text\n- list item\n- [x] done item\n\n| Name | Value |\n|---|---|\n| row | `cell` |\n\n```rust\n\tlet literal = \"**code stays**\";\n```";
     std::fs::write(
-        std::env::var("DUST_GITHUB_FIXTURE").unwrap(),
+        std::env::var("DUSTY_GITHUB_FIXTURE").unwrap(),
         serde_json::json!({
             "calls":[],"comments":["### Comment heading\nA **comment needle** with `styled runs`."],
             "issues":[{"number":7,"title":"Only identity","body":raw}]
@@ -2617,7 +2621,7 @@ fn github_markdown_prose_styles_visible_find_and_raw_drafts_preserve_local_git()
         matches!(
             done.style,
             Style::Git {
-                role: dust::ui::GitRole::Added,
+                role: dusty::ui::GitRole::Added,
                 ..
             }
         ),
@@ -2684,8 +2688,8 @@ fn github_markdown_reviews_and_threads_share_visible_find_but_patches_stay_liter
     ) {
         return;
     }
-    use dust::config::Highlight;
-    std::fs::write(std::env::var("DUST_GITHUB_FIXTURE").unwrap(), serde_json::json!({
+    use dusty::config::Highlight;
+    std::fs::write(std::env::var("DUSTY_GITHUB_FIXTURE").unwrap(), serde_json::json!({
         "calls":[],"comments":["### Comment heading\nA **comment needle**."],
         "prs":[{"number":9,"title":"PR identity","body":"### Description heading\nA **description needle**.",
             "reviews":[{"author":{"login":"reviewer"},"state":"APPROVED","body":"### Review heading\nA **review needle**."}]}],
@@ -2695,7 +2699,7 @@ fn github_markdown_reviews_and_threads_share_visible_find_but_patches_stay_liter
         "diff":"diff --git a/example.rs b/example.rs\n--- /dev/null\n+++ b/example.rs\n@@ -0,0 +1 @@\n+let raw = \"**patch literal**\";\n"
     }).to_string()).unwrap();
     let mut screen =
-        GitScreen::open(Path::new(&std::env::var("DUST_GITHUB_ROOT").unwrap())).unwrap();
+        GitScreen::open(Path::new(&std::env::var("DUSTY_GITHUB_ROOT").unwrap())).unwrap();
     goto(&mut screen, 0, 2);
     // The overview reads the description and the latest conversation.
     wait(&mut screen, "Review heading");
@@ -2798,7 +2802,7 @@ fn list_rows_at_100_columns_never_cut_a_word() {
     }
     // At 100×30 the subtitle's shortest rung, `#9 mayalee · ✓ 1 approval · 1 pending`, is three
     // cells wider than the list: unfitted, it read `· 1 pend`.
-    std::fs::write(std::env::var("DUST_GITHUB_FIXTURE").unwrap(), serde_json::json!({
+    std::fs::write(std::env::var("DUSTY_GITHUB_FIXTURE").unwrap(), serde_json::json!({
         "calls":[],
         "prs":[{"number":9,"title":"Resume queued tasks after a worker reconnects","author":{"login":"mayalee"},
             "reviewDecision":"REVIEW_REQUIRED","reviewRequests":["sam"],
@@ -2806,7 +2810,7 @@ fn list_rows_at_100_columns_never_cut_a_word() {
         "issues":[{"number":4,"title":"Queued tasks stall after a worker reconnects","author":{"login":"mayalee"}}]
     }).to_string()).unwrap();
     let mut screen =
-        GitScreen::open(Path::new(&std::env::var("DUST_GITHUB_ROOT").unwrap())).unwrap();
+        GitScreen::open(Path::new(&std::env::var("DUSTY_GITHUB_ROOT").unwrap())).unwrap();
     goto(&mut screen, 0, 2);
     wait(&mut screen, "Resume queued tasks");
     wait(&mut screen, "approval");
@@ -2821,12 +2825,12 @@ fn files_changed_e_opens_the_line_under_the_cursor_in_the_editor() {
     if fixture_child("files_changed_e_opens_the_line_under_the_cursor_in_the_editor") {
         return;
     }
-    use dust::git::screen::ScreenOutcome;
-    std::fs::write(std::env::var("DUST_GITHUB_FIXTURE").unwrap(), serde_json::json!({
+    use dusty::git::screen::ScreenOutcome;
+    std::fs::write(std::env::var("DUSTY_GITHUB_FIXTURE").unwrap(), serde_json::json!({
         "calls":[],"prs":[{"number":9,"title":"PR identity","body":"Body"}],
         "diff":"diff --git a/example.rs b/example.rs\n--- a/example.rs\n+++ b/example.rs\n@@ -1,3 +1,3 @@\n fn before() {}\n-fn old() {}\n+fn after() {}\n fn tail() {}\n"
     }).to_string()).unwrap();
-    let root = std::path::PathBuf::from(std::env::var("DUST_GITHUB_ROOT").unwrap());
+    let root = std::path::PathBuf::from(std::env::var("DUSTY_GITHUB_ROOT").unwrap());
     let mut screen = GitScreen::open(&root).unwrap();
     goto(&mut screen, 0, 2);
     wait(&mut screen, "PR identity");
@@ -2858,7 +2862,7 @@ fn github_detail_find_prose_wrap_unicode_cancel_and_scoped_drafts() {
     if fixture_child("github_detail_find_prose_wrap_unicode_cancel_and_scoped_drafts") {
         return;
     }
-    let state_path = std::env::var("DUST_GITHUB_FIXTURE").unwrap();
+    let state_path = std::env::var("DUSTY_GITHUB_FIXTURE").unwrap();
     let wrapped = format!("{}界", "abcdefghij".repeat(20));
     let filler = (0..55)
         .map(|n| format!("Paragraph line {n}.\n"))
@@ -2877,7 +2881,7 @@ fn github_detail_find_prose_wrap_unicode_cancel_and_scoped_drafts() {
     )
     .unwrap();
     let mut screen =
-        GitScreen::open(Path::new(&std::env::var("DUST_GITHUB_ROOT").unwrap())).unwrap();
+        GitScreen::open(Path::new(&std::env::var("DUSTY_GITHUB_ROOT").unwrap())).unwrap();
     goto(&mut screen, 0, 1);
     wait(&mut screen, "needle one needle two.");
     control(&mut screen, KeyCode::Char('l'));
@@ -3071,7 +3075,7 @@ fn github_detail_find_files_refresh_tabs_items_and_narrow_chooser() {
     if fixture_child("github_detail_find_files_refresh_tabs_items_and_narrow_chooser") {
         return;
     }
-    let state_path = std::env::var("DUST_GITHUB_FIXTURE").unwrap();
+    let state_path = std::env::var("DUSTY_GITHUB_FIXTURE").unwrap();
     let filler = (0..55)
         .map(|n| format!(" context_{n:02}\n"))
         .collect::<String>();
@@ -3089,7 +3093,7 @@ fn github_detail_find_files_refresh_tabs_items_and_narrow_chooser() {
     )
     .unwrap();
     let mut screen =
-        GitScreen::open(Path::new(&std::env::var("DUST_GITHUB_ROOT").unwrap())).unwrap();
+        GitScreen::open(Path::new(&std::env::var("DUSTY_GITHUB_ROOT").unwrap())).unwrap();
     goto(&mut screen, 0, 2);
     wait(&mut screen, "into main from feature/native");
     for _ in 0..3 {
@@ -3221,7 +3225,7 @@ fn github_detail_find_actions_logs_and_attempt_identity_are_native_and_read_only
     ) {
         return;
     }
-    let state_path = std::env::var("DUST_GITHUB_FIXTURE").unwrap();
+    let state_path = std::env::var("DUSTY_GITHUB_FIXTURE").unwrap();
     let prefix = "test (linux)\tUNKNOWN STEP\t2026-11-08T10:00:00.200Z ";
     let filler = (0..55)
         .map(|n| format!("{prefix}log line {n}\n"))
@@ -3236,7 +3240,7 @@ fn github_detail_find_actions_logs_and_attempt_identity_are_native_and_read_only
     )
     .unwrap();
     let mut screen =
-        GitScreen::open(Path::new(&std::env::var("DUST_GITHUB_ROOT").unwrap())).unwrap();
+        GitScreen::open(Path::new(&std::env::var("DUSTY_GITHUB_ROOT").unwrap())).unwrap();
     goto(&mut screen, 0, 3);
     wait(&mut screen, "Validate native workspace");
     wait(&mut screen, "attempt 2 of 2");
@@ -3412,14 +3416,14 @@ fn github_load_more_preserves_latest_body_find_identity_and_drafts_on_failure_an
     ) {
         return;
     }
-    let state_path = std::env::var("DUST_GITHUB_FIXTURE").unwrap();
+    let state_path = std::env::var("DUSTY_GITHUB_FIXTURE").unwrap();
     std::fs::write(&state_path, serde_json::json!({
         "calls":[],"comments":["Batch activity ready"],"issues":batch_items(1, 205, "OPEN"),
         "fail_list_limits":{"200":1},
         "read_gates":[{"prefix":["issue","list","--state","open","--search","","--limit","200"],"name":"more-issues"}]
     }).to_string()).unwrap();
     let mut screen =
-        GitScreen::open(Path::new(&std::env::var("DUST_GITHUB_ROOT").unwrap())).unwrap();
+        GitScreen::open(Path::new(&std::env::var("DUSTY_GITHUB_ROOT").unwrap())).unwrap();
     goto(&mut screen, 0, 1);
     wait(&mut screen, "Batch activity ready");
     key(&mut screen, KeyCode::Down);
@@ -3524,7 +3528,7 @@ fn github_load_more_depth_is_scoped_to_queries_states_saved_views_and_pages_and_
     ) {
         return;
     }
-    let state_path = std::env::var("DUST_GITHUB_FIXTURE").unwrap();
+    let state_path = std::env::var("DUSTY_GITHUB_FIXTURE").unwrap();
     let mut assigned = batch_items(501, 155, "OPEN");
     assigned.extend(batch_items(801, 165, "CLOSED"));
     std::fs::write(
@@ -3536,7 +3540,7 @@ fn github_load_more_depth_is_scoped_to_queries_states_saved_views_and_pages_and_
         .to_string(),
     )
     .unwrap();
-    let root_string = std::env::var("DUST_GITHUB_ROOT").unwrap();
+    let root_string = std::env::var("DUSTY_GITHUB_ROOT").unwrap();
     let root = Path::new(&root_string);
     git2::Repository::open(root).unwrap().config().unwrap()
         .open_level(git2::ConfigLevel::Local).unwrap()
@@ -3616,13 +3620,13 @@ fn github_load_more_empty_short_and_exact_batches_are_truthful() {
     if fixture_child("github_load_more_empty_short_and_exact_batches_are_truthful") {
         return;
     }
-    let state_path = std::env::var("DUST_GITHUB_FIXTURE").unwrap();
+    let state_path = std::env::var("DUSTY_GITHUB_FIXTURE").unwrap();
     std::fs::write(&state_path, serde_json::json!({
         "calls":[],"comments":[],"issues":[],
         "issue_queries":{"author:@me":batch_items(1, 99, "OPEN"),"assignee:@me":batch_items(101, 100, "OPEN")}
     }).to_string()).unwrap();
     let mut screen =
-        GitScreen::open(Path::new(&std::env::var("DUST_GITHUB_ROOT").unwrap())).unwrap();
+        GitScreen::open(Path::new(&std::env::var("DUSTY_GITHUB_ROOT").unwrap())).unwrap();
     goto(&mut screen, 0, 1);
     wait_list_count(&mut screen, "open", 0);
     assert!(view(&mut screen).contains("No issues match this view"));
@@ -3671,7 +3675,7 @@ fn github_load_more_ceiling_keeps_refresh_depth_and_invites_refining_the_filter(
     {
         return;
     }
-    let state_path = std::env::var("DUST_GITHUB_FIXTURE").unwrap();
+    let state_path = std::env::var("DUSTY_GITHUB_FIXTURE").unwrap();
     std::fs::write(
         &state_path,
         serde_json::json!({
@@ -3681,7 +3685,7 @@ fn github_load_more_ceiling_keeps_refresh_depth_and_invites_refining_the_filter(
     )
     .unwrap();
     let mut screen =
-        GitScreen::open(Path::new(&std::env::var("DUST_GITHUB_ROOT").unwrap())).unwrap();
+        GitScreen::open(Path::new(&std::env::var("DUSTY_GITHUB_ROOT").unwrap())).unwrap();
     goto(&mut screen, 0, 1);
     wait_list_count(&mut screen, "open", 100);
     for limit in (200..=1000).step_by(100) {
@@ -3726,7 +3730,7 @@ fn github_list_edges_and_pages_are_native_and_read_only() {
         return;
     }
     std::fs::write(
-        std::env::var("DUST_GITHUB_FIXTURE").unwrap(),
+        std::env::var("DUSTY_GITHUB_FIXTURE").unwrap(),
         serde_json::json!({
             "calls":[],"comments":[],"issues":batch_items(1, 99, "OPEN"),
             "issue_queries":{"":[],"author:@me":batch_items(1, 99, "OPEN")}
@@ -3735,7 +3739,7 @@ fn github_list_edges_and_pages_are_native_and_read_only() {
     )
     .unwrap();
     let mut screen =
-        GitScreen::open(Path::new(&std::env::var("DUST_GITHUB_ROOT").unwrap())).unwrap();
+        GitScreen::open(Path::new(&std::env::var("DUSTY_GITHUB_ROOT").unwrap())).unwrap();
     goto(&mut screen, 0, 1);
     wait_list_count(&mut screen, "open", 0);
     for code in [
@@ -3777,8 +3781,8 @@ fn github_list_edges_and_pages_are_native_and_read_only() {
 }
 
 /// WCAG relative luminance of an RGB theme colour.
-fn theme_luminance(colour: dust::config::ThemeColor) -> Option<f64> {
-    let dust::config::ThemeColor::Rgb(red, green, blue) = colour else {
+fn theme_luminance(colour: dusty::config::ThemeColor) -> Option<f64> {
+    let dusty::config::ThemeColor::Rgb(red, green, blue) = colour else {
         return None;
     };
     let linear = |channel: u8| {
@@ -3797,9 +3801,9 @@ fn forge_screens_take_every_colour_from_the_theme() {
     if fixture_child("forge_screens_take_every_colour_from_the_theme") {
         return;
     }
-    use dust::config::{ThemeColor, ThemeConfig};
-    use dust::ui::{Emphasis, GitRole, GitSurface, Style};
-    // Dust's designed dark palette: no other theme may show any of it (it once coloured every
+    use dusty::config::{ThemeColor, ThemeConfig};
+    use dusty::ui::{Emphasis, GitRole, GitSurface, Style};
+    // Dusty's designed dark palette: no other theme may show any of it (it once coloured every
     // dark theme's forge screens, whatever the theme).
     const DESIGNED: [(u8, u8, u8); 16] = [
         (0x15, 0x19, 0x23),
@@ -3838,14 +3842,14 @@ fn forge_screens_take_every_colour_from_the_theme() {
         ),
         ("nord", include_str!("../assets/themes/nord.toml")),
     ];
-    let state_path = std::env::var("DUST_GITHUB_FIXTURE").unwrap();
+    let state_path = std::env::var("DUSTY_GITHUB_FIXTURE").unwrap();
     std::fs::write(
         &state_path,
         r#"{"calls":[],"comments":["Theme audit discussion."]}"#,
     )
     .unwrap();
     let mut screen =
-        GitScreen::open(Path::new(&std::env::var("DUST_GITHUB_ROOT").unwrap())).unwrap();
+        GitScreen::open(Path::new(&std::env::var("DUSTY_GITHUB_ROOT").unwrap())).unwrap();
     // The issues list and reader (label chips, the composer), the close dialog over its dimmed
     // backdrop, and a pull request's Conversation with its sidebar and merge card.
     goto(&mut screen, 0, 1);
@@ -3891,7 +3895,7 @@ fn forge_screens_take_every_colour_from_the_theme() {
                         if let ThemeColor::Rgb(red, green, blue) = colour {
                             assert!(
                                 !DESIGNED.contains(&(red, green, blue)),
-                                "Dust's dark palette in {at}"
+                                "Dusty's dark palette in {at}"
                             );
                         }
                     }
@@ -3936,7 +3940,7 @@ fn enter_on_a_blocked_merge_box_moves_to_the_first_reason_without_a_message() {
         return;
     }
     std::fs::write(
-        std::env::var("DUST_GITHUB_FIXTURE").unwrap(),
+        std::env::var("DUSTY_GITHUB_FIXTURE").unwrap(),
         serde_json::json!({
             "calls":[], "prs":[{"number":9,"reviewDecision":"REVIEW_REQUIRED"}]
         })
@@ -3944,7 +3948,7 @@ fn enter_on_a_blocked_merge_box_moves_to_the_first_reason_without_a_message() {
     )
     .unwrap();
     let mut screen =
-        GitScreen::open(Path::new(&std::env::var("DUST_GITHUB_ROOT").unwrap())).unwrap();
+        GitScreen::open(Path::new(&std::env::var("DUSTY_GITHUB_ROOT").unwrap())).unwrap();
     goto(&mut screen, 0, 2);
     wait(&mut screen, "On merge");
     wait(&mut screen, "Merging is blocked");
@@ -3975,7 +3979,7 @@ fn j_reaches_the_merge_box_past_a_row_that_shares_the_sidebars_link() {
     }
     // The timeline mentions #7, which the sidebar's Development also links: two rows with one
     // action. The cursor must keep the row it is on, not snap back to the first (build 81).
-    let state_path = std::env::var("DUST_GITHUB_FIXTURE").unwrap();
+    let state_path = std::env::var("DUSTY_GITHUB_FIXTURE").unwrap();
     std::fs::write(&state_path, serde_json::json!({
         "calls":[],"comments":["Discussion after the mention."],
         "timelines":{"9":[
@@ -3989,7 +3993,7 @@ fn j_reaches_the_merge_box_past_a_row_that_shares_the_sidebars_link() {
         ]}
     }).to_string()).unwrap();
     let mut screen =
-        GitScreen::open(Path::new(&std::env::var("DUST_GITHUB_ROOT").unwrap())).unwrap();
+        GitScreen::open(Path::new(&std::env::var("DUSTY_GITHUB_ROOT").unwrap())).unwrap();
     goto(&mut screen, 0, 2);
     wait(&mut screen, "On merge");
     wait(&mut screen, "A comment below the mention.");

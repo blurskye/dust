@@ -71,13 +71,13 @@ pub(super) fn validate_tool_id(value: &str) -> Result<(), String> {
 
 pub(super) fn ensure_private_directory(path: &Path) -> Result<(), String> {
     if !path.is_absolute() {
-        return Err("Dust tool store must be absolute".into());
+        return Err("Dusty tool store must be absolute".into());
     }
     fs::create_dir_all(path).map_err(|error| format!("cannot create tool store: {error}"))?;
     let metadata = fs::symlink_metadata(path)
         .map_err(|error| format!("cannot inspect tool store: {error}"))?;
     if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
-        return Err("Dust tool store is not a real directory".into());
+        return Err("Dusty tool store is not a real directory".into());
     }
     #[cfg(unix)]
     {

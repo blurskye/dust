@@ -244,7 +244,7 @@ impl PluginHost {
         let (tx, rx) = mpsc::sync_channel::<QueuedRequest>(capacity);
         let (etx, erx) = mpsc::sync_channel(capacity);
         thread::Builder::new()
-            .name("dust-components".into())
+            .name("dusty-components".into())
             .spawn(move || {
                 let mut runtimes: BTreeMap<String, RuntimeSlot> = BTreeMap::new();
                 let mut indexed: BTreeMap<(String, PluginLoadId), IndexedCandidate> =

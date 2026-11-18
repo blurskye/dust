@@ -1,7 +1,7 @@
 # The Settings page (`:settings`, ctrl-, or <leader>,): each section lists settings by key with
 # a description. The title comes from the key unless one is given; `choices` makes a dropdown,
 # `choices_from` fills one from a table of the configuration, and `restart` says the change
-# takes effect next time Dust starts. Every setting in config.toml must be listed here or sit
+# takes effect next time Dusty starts. Every setting in config.toml must be listed here or sit
 # under one of the `collections`, which are edited in config.toml itself.
 
 collections = [
@@ -37,7 +37,7 @@ settings = [
   { key = "editor.line_endings", about = "Line endings written on save; preserve keeps what the file had.", choices = ["preserve", "lf", "cr_lf", "cr"] },
   { key = "editor.final_newline", about = "Whether a saved file ends with a newline; preserve keeps what the file had.", choices = ["preserve", "insert", "remove"] },
   { key = "editor.ambiguous_width", about = "How wide characters of ambiguous width are drawn; match your terminal.", choices = ["narrow", "wide"] },
-  { key = "editor.registers.clipboard", title = "System Clipboard", about = "unnamedplus shares yank and paste with the system clipboard; off keeps them inside Dust.", choices = ["unnamedplus", "off"] },
+  { key = "editor.registers.clipboard", title = "System Clipboard", about = "unnamedplus shares yank and paste with the system clipboard; off keeps them inside Dusty.", choices = ["unnamedplus", "off"] },
   { key = "editor.indent_guides.enabled", about = "Draw a line at each indentation level." },
   { key = "editor.markdown.render", title = "Render Markdown", about = "Draw markdown headings, lists, code and links in place; the cursor's line shows the source." },
   { key = "editor.markdown.table_bottom", title = "Table Bottom Border", about = "Close a markdown table with a border under its last row." },
@@ -86,10 +86,10 @@ settings = [
 title = "AI Agents"
 settings = [
   { key = "agents.default", title = "Default Agent", about = "The agent <leader>aa and ctrl-t in the agent panel start; ctrl-shift-t always asks.", choices_from = "agents.profiles", empty = "Ask every time" },
-  { key = "agents.connection", about = "acp runs the agent inside Dust's agent panel; terminal runs the agent's own command-line program in a terminal beside the editor.", choices = ["acp", "terminal"] },
+  { key = "agents.connection", about = "acp runs the agent inside Dusty's agent panel; terminal runs the agent's own command-line program in a terminal beside the editor.", choices = ["acp", "terminal"] },
   { key = "agents.side", title = "Panel Side", about = "The side the agent panel or terminal agent opens on.", choices = ["right", "left"] },
   { key = "agents.panel_width", title = "Panel Width (%)", about = "Share of the editor width the agent panel opens at." },
-  { key = "agents.add_tools", title = "Add Dust's Tools", about = "Give agents that keep their tools in their own config, such as pi, Dust's tools and subagents, by running their add_tools command before they start." },
+  { key = "agents.add_tools", title = "Add Dusty's Tools", about = "Give agents that keep their tools in their own config, such as pi, Dusty's tools and subagents, by running their add_tools command before they start." },
 ]
 
 [[section]]
@@ -132,9 +132,9 @@ settings = [
 [[section]]
 title = "Files & Session"
 settings = [
-  { key = "startup.show_dashboard", title = "Show Dashboard", about = "Show the start screen when Dust opens without a file." },
+  { key = "startup.show_dashboard", title = "Show Dashboard", about = "Show the start screen when Dusty opens without a file." },
   { key = "persistence.enabled", title = "Remember Session", about = "Remember open files, marks, jumps and recent files between runs." },
-  { key = "persistence.restore_on_startup", about = "Reopen the last session's files when Dust starts." },
+  { key = "persistence.restore_on_startup", about = "Reopen the last session's files when Dusty starts." },
   { key = "persistence.undo_history", title = "Persistent Undo", about = "Keep each file's undo history across restarts." },
   { key = "recovery.enabled", title = "Crash Recovery", about = "Keep a journal of unsaved changes so they survive a crash." },
 ]
@@ -144,7 +144,7 @@ title = "Keyboard & Mouse"
 settings = [
   { key = "input.keymaps.leader", title = "Leader Key", about = "The key that starts <leader> shortcuts." },
   { key = "input.keymaps.local_leader", title = "Local Leader Key", about = "The key that starts <localleader> shortcuts." },
-  { key = "input.mapping_timeout_ms", title = "Key Sequence Timeout (ms)", about = "How long Dust waits for the next key of a sequence." },
+  { key = "input.mapping_timeout_ms", title = "Key Sequence Timeout (ms)", about = "How long Dusty waits for the next key of a sequence." },
   { key = "ui.mouse", title = "Mouse", about = "Click, scroll and drag with the mouse." },
 ]
 

@@ -79,7 +79,7 @@ fn read_messages(
     sender: mpsc::SyncSender<Result<Value, String>>,
 ) -> io::Result<JoinHandle<()>> {
     let reader = thread::Builder::new()
-        .name("dust-dap-reader".into())
+        .name("dusty-dap-reader".into())
         .spawn(move || {
             let mut input = BufReader::new(input);
             loop {

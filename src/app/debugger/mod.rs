@@ -586,7 +586,7 @@ impl Debugger {
     fn note_refused_expansion(&mut self, reference: i64) {
         self.push_console(crate::debugger::DapConsoleEntry::new(
             crate::debugger::DapConsoleOrigin::Notice,
-            "dust",
+            "dusty",
             format!("reference {reference} is already open on this path; it is not expanded again"),
         ));
     }
@@ -594,7 +594,7 @@ impl Debugger {
     fn note_refused_answer(&mut self) {
         self.push_console(crate::debugger::DapConsoleEntry::new(
             crate::debugger::DapConsoleOrigin::Notice,
-            "dust",
+            "dusty",
             "a debugger answer from an earlier stop was refused; it is not current",
         ));
     }
@@ -1138,7 +1138,7 @@ impl Debugger {
                     self.breakpoint_refresh.remove(&path);
                     self.push_console(crate::debugger::DapConsoleEntry::new(
                         crate::debugger::DapConsoleOrigin::Notice,
-                        "dust",
+                        "dusty",
                         error.to_string(),
                     ));
                 }
@@ -1670,7 +1670,7 @@ impl Debugger {
                 self.stop_follow = StopFollow::Idle;
                 self.push_console(crate::debugger::DapConsoleEntry::new(
                     crate::debugger::DapConsoleOrigin::Notice,
-                    "dust",
+                    "dusty",
                     error.to_string(),
                 ));
             }

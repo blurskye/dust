@@ -273,7 +273,7 @@ impl Debugger {
             let adapter = DebugAdapterConfig {
                 program: executable.clone(),
                 arguments: entry.definition.launch_args.clone(),
-                // The program being debugged runs with what the user's shell gave Dust. Delve
+                // The program being debugged runs with what the user's shell gave Dusty. Delve
                 // also needs it to find `go`, and hangs without one.
                 environment: std::env::vars_os()
                     .filter_map(|(key, value)| {
@@ -626,7 +626,7 @@ impl Debugger {
                         .duration_since(std::time::UNIX_EPOCH)
                         .map_or(0, |elapsed| elapsed.as_nanos());
                     arguments.entry("output").or_insert_with(|| {
-                        serde_json::json!(std::env::temp_dir().join(format!("dust-debug-{stamp}")))
+                        serde_json::json!(std::env::temp_dir().join(format!("dusty-debug-{stamp}")))
                     });
                 }
                 if let Some(program) = launch.program {

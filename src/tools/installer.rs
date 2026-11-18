@@ -139,7 +139,7 @@ impl ToolInstaller {
         let stopping = Arc::new(AtomicBool::new(false));
         let worker_stopping = Arc::clone(&stopping);
         let thread = thread::Builder::new()
-            .name("dust-tool-installer".into())
+            .name("dusty-tool-installer".into())
             .spawn(move || {
                 while let Ok(request) = requests.recv() {
                     if worker_stopping.load(Ordering::Acquire) {

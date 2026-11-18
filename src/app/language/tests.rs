@@ -3023,7 +3023,7 @@ fn generic_picker_filters_and_invokes_registry_commands() {
         app.ui
             .notification
             .as_deref()
-            .is_some_and(|message| message.contains("Dust health"))
+            .is_some_and(|message| message.contains("Dusty health"))
     );
 }
 
@@ -4587,7 +4587,7 @@ fn lsp_tool_menu_hides_missing_noninstallable_compatibility_entries() {
             name: "Missing Catalog Server".into(),
             kind: ToolKind::Lsp,
             languages: vec!["catalog-test".into()],
-            executable: "dust-certainly-missing-language-server".into(),
+            executable: "dusty-certainly-missing-language-server".into(),
             version: None,
             release: None,
             launch_args: Vec::new(),
@@ -4625,7 +4625,7 @@ fn enter_installs_a_missing_managed_lsp_instead_of_trying_to_start_it() {
             name: "Installable LSP".into(),
             kind: ToolKind::Lsp,
             languages: vec!["install-test".into()],
-            executable: "dust-certainly-missing-installable-lsp".into(),
+            executable: "dusty-certainly-missing-installable-lsp".into(),
             version: Some("1.0.0".into()),
             release: None,
             launch_args: Vec::new(),
@@ -4792,7 +4792,7 @@ fn lsp_tool_menu_is_registry_driven_filterable_and_configurable() {
         );
         assert_eq!(
             app.ui.tool_menu.as_ref().expect("tool menu").rows[rust].runtime,
-            "Dust (Nix)"
+            "Dusty (Nix)"
         );
     } else {
         assert!(picker.options.iter().all(|option| option.source != "nix"));
@@ -4848,7 +4848,7 @@ fn lsp_tool_menu_is_registry_driven_filterable_and_configurable() {
         );
         assert_eq!(
             app.ui.tool_menu.as_ref().expect("tool menu").rows[rust].runtime,
-            "Dust"
+            "Dusty"
         );
     }
     app.handle_configured_key(KeyEvent::character('j'));
@@ -6032,7 +6032,7 @@ fn explicit_detach_survives_autostart_until_attach() {
         .fixture_retain(|entry| entry.definition.kind != crate::tools::ToolKind::Lsp);
     for mut server in servers {
         server.status = crate::tools::ToolStatus::Available;
-        server.definition.executable = "dust-missing-language-server".into();
+        server.definition.executable = "dusty-missing-language-server".into();
         app.tooling.fixture_insert(server);
     }
     prepare_trust_identity(&mut app);

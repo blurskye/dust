@@ -15,7 +15,7 @@ const DEFAULTS: &str = include_str!(concat!(
     "/assets/defaults/highlights.toml"
 ));
 
-/// Groups Dust's own surfaces draw with, registered first so each has a fixed id.
+/// Groups Dusty's own surfaces draw with, registered first so each has a fixed id.
 const BUILTIN: [&str; 16] = [
     "@comment",
     "@string",

@@ -213,7 +213,7 @@ impl Config {
             return Err("ui.key_hints.delay_ms exceeds 60 seconds".into());
         }
         if self.schema_version > crate::config::CONFIG_SCHEMA_VERSION {
-            return Err("configuration schema is newer than this Dust build".into());
+            return Err("configuration schema is newer than this Dusty build".into());
         }
         if self.debug.adapters.iter().any(|(id, adapter)| {
             id.is_empty()

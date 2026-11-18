@@ -1,5 +1,5 @@
 //! The first-start setup: one question per page, its choices down the left and, on the right,
-//! a small Dust drawn in the theme's colours the way the highlighted choices would lay it out.
+//! a small Dusty drawn in the theme's colours the way the highlighted choices would lay it out.
 
 use crate::config::AgentConnection;
 
@@ -70,7 +70,7 @@ pub(super) fn render_setup(
     draw_box(frame, left, top, layout.width, layout.height);
     frame
         .grid
-        .put_text(left + 2, top, " Welcome to Dust ", Style::Accent);
+        .put_text(left + 2, top, " Welcome to Dusty ", Style::Accent);
 
     // Where the person is: every page's title, the current one highlighted.
     let mut x = left + 2;
@@ -223,7 +223,7 @@ impl Area {
 /// the page is about open in it.
 struct Scene<'a> {
     explorer: PanelSide,
-    /// The agent panel's side, whether it is Dust's panel (ACP) rather than the agent's own
+    /// The agent panel's side, whether it is Dusty's panel (ACP) rather than the agent's own
     /// program, and the agent's name.
     agent: Option<(PanelSide, bool, &'a str)>,
     terminal: Option<TerminalPlacement>,

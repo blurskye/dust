@@ -8,10 +8,10 @@ mod forge_fake;
 #[path = "support/forge_world.rs"]
 mod forge_world;
 
-use dust::forge::ForgeJobs;
-use dust::forge::ForgeReply;
-use dust::forge::PullRequest;
-use dust::forge::ReviewComment;
+use dusty::forge::ForgeJobs;
+use dusty::forge::ForgeReply;
+use dusty::forge::PullRequest;
+use dusty::forge::ReviewComment;
 use forge_world::Forge;
 use forge_world::World;
 use forge_world::git;
@@ -251,7 +251,7 @@ fn gitlab_review_comments_follow_the_source_branch() {
     );
 }
 
-/// Gitea and Forgejo: Dust's own `pr-N` branch, and a fork checkout whose upstream is
+/// Gitea and Forgejo: Dusty's own `pr-N` branch, and a fork checkout whose upstream is
 /// `refs/pull/N/head` (the fork's branch has no pull request in the base repository).
 fn gitea_threads(forge: Forge, test: &str, fork: bool) {
     if let Some(root) = child_repo() {

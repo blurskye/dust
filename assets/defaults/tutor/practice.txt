@@ -18,9 +18,9 @@ Changing text
 
     Thhe cow jumpped over thee moon.
 
-    Dust is a editor
+    Dusty is a editor
 
-    Dust runs in a
+    Dusty runs in a
 
     Open a line below this one.
 
@@ -30,7 +30,7 @@ Changing text
 
     This is a red apple.
 
-    Dusk is fast.
+    Dusts is fast.
 
     one line,
     joined.

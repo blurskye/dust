@@ -154,7 +154,7 @@ pub(super) fn managed_bun_runtime(
     report: &mut ToolProgressReporter,
     compatibility: Option<&NixCompatibilityRuntime>,
 ) -> Result<PathBuf, String> {
-    // NixOS uses Dust's exact checked GNU Bun artifact so PATH cannot silently
+    // NixOS uses Dusty's exact checked GNU Bun artifact so PATH cannot silently
     // change the runtime processed by the private compatibility environment.
     if compatibility.is_none()
         && let Some(bun) = discover_executable("bun")
@@ -200,12 +200,12 @@ pub(super) fn run_managed(
                 .into_iter()
                 .map(|(key, value)| (key, value.into())),
         );
-        effective_environment.insert("DUST_NIX_LD".into(), runtime.nix_ld.as_os_str().to_owned());
+        effective_environment.insert("DUSTY_NIX_LD".into(), runtime.nix_ld.as_os_str().to_owned());
         let mut paths = env::split_paths(&runtime.runtime_path).collect::<Vec<_>>();
         if let Some(existing) = effective_environment.get("PATH") {
             paths.extend(env::split_paths(existing));
         }
-        let path = env::join_paths(paths).map_err(|_| "Dust Nix compatibility PATH is invalid")?;
+        let path = env::join_paths(paths).map_err(|_| "Dusty Nix compatibility PATH is invalid")?;
         effective_environment.insert("PATH".into(), path);
     }
     let mut command = Command::new(program);
@@ -732,7 +732,7 @@ pub(super) fn install_nix_lsp_profile(
     report: &mut ToolProgressReporter,
 ) -> Result<Option<PathBuf>, String> {
     let profile_id = nix_lsp_shell(definition)
-        .ok_or("this LSP has no verified artifact for the Dust Nix runtime")?;
+        .ok_or("this LSP has no verified artifact for the Dusty Nix runtime")?;
     let workspace = prepare_nix_lsp_workspace_at(&root.join("nix-lsp-workspace"))?;
     let profile = workspace.join("profiles").join(profile_id);
     let compatibility = match parse_nix_runtime_environment(&profile) {
@@ -742,7 +742,7 @@ pub(super) fn install_nix_lsp_profile(
             // the generic runtime out-link. The verified artifact is left untouched
             // until its replacement has passed extraction and probing.
             uninstall_nix_lsp_profile(definition, root)?;
-            report("realizing Dust Nix compatibility", 0, None);
+            report("realizing Dusty Nix compatibility", 0, None);
             let arguments = vec![
                 "build".into(),
                 "--no-update-lock-file".into(),
@@ -785,39 +785,39 @@ pub(super) fn uninstall_nix_lsp_profile(
     root: &Path,
 ) -> Result<(), String> {
     let shell =
-        nix_lsp_shell(definition).ok_or("this LSP has no Dust Nix compatibility runtime")?;
+        nix_lsp_shell(definition).ok_or("this LSP has no Dusty Nix compatibility runtime")?;
     let profiles = root.join("nix-lsp-workspace/profiles");
     let metadata = match fs::symlink_metadata(&profiles) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(format!("cannot inspect Dust Nix environments: {error}")),
+        Err(error) => return Err(format!("cannot inspect Dusty Nix environments: {error}")),
     };
     if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
-        return Err("Dust Nix environment store is not a real directory".into());
+        return Err("Dusty Nix environment store is not a real directory".into());
     }
     let generation_prefix = format!("{shell}-");
     let mut removed = 0usize;
     for entry in fs::read_dir(&profiles)
-        .map_err(|error| format!("cannot read Dust Nix environments: {error}"))?
+        .map_err(|error| format!("cannot read Dusty Nix environments: {error}"))?
     {
         let entry =
-            entry.map_err(|error| format!("cannot inspect Dust Nix environment: {error}"))?;
+            entry.map_err(|error| format!("cannot inspect Dusty Nix environment: {error}"))?;
         let name = entry.file_name();
         let name = name.to_string_lossy();
         if name != shell && !(name.starts_with(&generation_prefix) && name.ends_with("-link")) {
             continue;
         }
         let metadata = fs::symlink_metadata(entry.path())
-            .map_err(|error| format!("cannot inspect Dust Nix environment link: {error}"))?;
+            .map_err(|error| format!("cannot inspect Dusty Nix environment link: {error}"))?;
         if !metadata.file_type().is_symlink() {
-            return Err("Dust Nix environment entry is not a symlink".into());
+            return Err("Dusty Nix environment entry is not a symlink".into());
         }
         fs::remove_file(entry.path())
-            .map_err(|error| format!("cannot remove Dust Nix environment: {error}"))?;
+            .map_err(|error| format!("cannot remove Dusty Nix environment: {error}"))?;
         removed = removed.saturating_add(1);
     }
     if removed == 0 && nix_profile_installed_at(&profiles.join(shell)) {
-        return Err("Dust Nix environment could not be removed".into());
+        return Err("Dusty Nix environment could not be removed".into());
     }
     Ok(())
 }

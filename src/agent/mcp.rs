@@ -1,10 +1,10 @@
-//! The MCP server Dust gives each top-level agent session. It has one tool, `agent`, which
-//! starts a subagent in a new tab of Dust's agent panel and returns the subagent's final
+//! The MCP server Dusty gives each top-level agent session. It has one tool, `agent`, which
+//! starts a subagent in a new tab of Dusty's agent panel and returns the subagent's final
 //! answer, so every agent gets the same subagents whatever its own harness offers. It runs
-//! as `dust --agent-tools <tab>`, speaks MCP (JSON-RPC, one message per line) on stdin and
-//! stdout, and asks the running Dust over the socket in `DUST_SERVER`. Agents that only read
-//! MCP servers from their own config, such as pi, run `dust --agent-tools` with no tab; it
-//! then uses `DUST_AGENT_TAB`, which Dust sets for every agent it starts. Outside Dust, or in
+//! as `dusty --agent-tools <tab>`, speaks MCP (JSON-RPC, one message per line) on stdin and
+//! stdout, and asks the running Dusty over the socket in `DUSTY_SERVER`. Agents that only read
+//! MCP servers from their own config, such as pi, run `dusty --agent-tools` with no tab; it
+//! then uses `DUSTY_AGENT_TAB`, which Dusty sets for every agent it starts. Outside Dusty, or in
 //! a subagent, the server offers no tools.
 
 use std::io;
@@ -36,27 +36,32 @@ use serde_json::json;
 use crate::remote;
 
 /// The configured agent profiles, comma separated, for the tool's description.
-pub const PROFILES_VARIABLE: &str = "DUST_AGENT_PROFILES";
+pub const PROFILES_VARIABLE: &str = "DUSTY_AGENT_PROFILES";
 /// The tab number of the agent session, for servers started from an agent's own config.
-pub const TAB_VARIABLE: &str = "DUST_AGENT_TAB";
+pub const TAB_VARIABLE: &str = "DUSTY_AGENT_TAB";
 
 const MAX_MESSAGE_BYTES: u64 = 1024 * 1024;
 const MAX_CONCURRENT_CALLS: usize = 8;
 
-const INSTRUCTIONS: &str = "You run inside Dust, a terminal editor. Dust provides subagents \
+const INSTRUCTIONS: &str = "You run inside Dusty, a terminal editor. Dusty provides subagents \
 through the `agent` tool of this server. Whenever a subagent would help (a broad search, \
 independent tasks that can run in parallel, a self-contained change), use this tool and \
-never a built-in subagent or task tool. Each subagent shows up as its own tab in Dust.";
+never a built-in subagent or task tool. Each subagent shows up as its own tab in Dusty.";
 
 /// The `mcpServers` entry of `session/new` that runs this server for the tab `tab`.
-pub fn server_entry(dust: &Path, socket: &Path, tab: u64, profiles: &str) -> Result<Value, String> {
-    let dust = dust.to_str().ok_or("Dust's MCP server requires a UTF-8 executable path; move Dust to a UTF-8 installation directory")?;
+pub fn server_entry(
+    dusty: &Path,
+    socket: &Path,
+    tab: u64,
+    profiles: &str,
+) -> Result<Value, String> {
+    let dusty = dusty.to_str().ok_or("Dusty's MCP server requires a UTF-8 executable path; move Dusty to a UTF-8 installation directory")?;
     let socket = socket
         .to_str()
-        .ok_or("Dust's MCP server requires a UTF-8 socket path; use a UTF-8 runtime directory")?;
+        .ok_or("Dusty's MCP server requires a UTF-8 socket path; use a UTF-8 runtime directory")?;
     Ok(json!({
-        "name": "dust",
-        "command": dust,
+        "name": "dusty",
+        "command": dusty,
         "args": ["--agent-tools", tab.to_string()],
         "env": [
             {"name": remote::SERVER_VARIABLE, "value": socket},
@@ -66,7 +71,7 @@ pub fn server_entry(dust: &Path, socket: &Path, tab: u64, profiles: &str) -> Res
 }
 
 /// Answer MCP requests until stdin closes. Tool calls run on their own threads, so several
-/// subagents can work at once. Without Dust's socket and a tab there are no tools.
+/// subagents can work at once. Without Dusty's socket and a tab there are no tools.
 pub fn serve(target: Option<(PathBuf, u64)>, profiles: &str) -> io::Result<()> {
     serve_io(
         io::stdin().lock(),
@@ -108,7 +113,7 @@ fn serve_io<W: Write + Send + 'static>(
         let Ok(message) = serde_json::from_slice::<Value>(&line) else {
             continue;
         };
-        // Closing this call's connection tells Dust to stop only its subagent.
+        // Closing this call's connection tells Dusty to stop only its subagent.
         if message["method"] == "notifications/cancelled" && message.get("id").is_none() {
             if let Some((_, stream, _)) = calls
                 .iter()
@@ -126,7 +131,7 @@ fn serve_io<W: Write + Send + 'static>(
             "initialize" => Ok(json!({
                 "protocolVersion": params["protocolVersion"].as_str().unwrap_or("2025-06-18"),
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "dust", "version": env!("CARGO_PKG_VERSION")},
+                "serverInfo": {"name": "dusty", "version": env!("CARGO_PKG_VERSION")},
                 "instructions": if target.is_some() { INSTRUCTIONS } else { "" },
             })),
             "ping" => Ok(json!({})),
@@ -137,7 +142,7 @@ fn serve_io<W: Write + Send + 'static>(
                         &output,
                         &answer(
                             id,
-                            Err(json!({"code": -32602, "message": "Dust offers no tools here"})),
+                            Err(json!({"code": -32602, "message": "Dusty offers no tools here"})),
                         ),
                     );
                     continue;
@@ -145,7 +150,7 @@ fn serve_io<W: Write + Send + 'static>(
                 calls.retain(|(_, _, call)| !call.is_finished());
                 if calls.len() == MAX_CONCURRENT_CALLS {
                     Err(
-                        json!({"code": -32000, "message": "Dust's subagent capacity is full; retry after a call finishes"}),
+                        json!({"code": -32000, "message": "Dusty's subagent capacity is full; retry after a call finishes"}),
                     )
                 } else {
                     match UnixStream::connect(&socket)
@@ -161,7 +166,7 @@ fn serve_io<W: Write + Send + 'static>(
                             continue;
                         }
                         Err(error) => Err(
-                            json!({"code": -32603, "message": format!("could not reach Dust: {error}")}),
+                            json!({"code": -32603, "message": format!("could not reach Dusty: {error}")}),
                         ),
                     }
                 }
@@ -230,7 +235,7 @@ fn tool(profiles: &str) -> Value {
 fn call(stream: UnixStream, tab: u64, params: &Value) -> Value {
     let arguments = &params["arguments"];
     let (text, failed) = if params["name"] != "agent" {
-        (format!("Dust has no tool {}", params["name"]), true)
+        (format!("Dusty has no tool {}", params["name"]), true)
     } else {
         let request = json!({
             "parent": tab,
@@ -250,7 +255,7 @@ fn call(stream: UnixStream, tab: u64, params: &Value) -> Value {
                     true,
                 ),
             },
-            Err(error) => (format!("could not reach Dust: {error}"), true),
+            Err(error) => (format!("could not reach Dusty: {error}"), true),
         }
     };
     json!({"content": [{"type": "text", "text": text}], "isError": failed})
@@ -275,7 +280,7 @@ mod tests {
         use std::ffi::OsStr;
         use std::os::unix::ffi::OsStrExt;
         let invalid = Path::new(OsStr::from_bytes(b"/invalid-\xff"));
-        let valid = Path::new("/dust");
+        let valid = Path::new("/dusty");
         assert!(
             server_entry(invalid, valid, 1, "")
                 .unwrap_err()
@@ -287,7 +292,7 @@ mod tests {
                 .contains("socket path")
         );
         let entry = server_entry(valid, Path::new("/socket"), 1, "pi").unwrap();
-        assert_eq!(entry["command"], "/dust");
+        assert_eq!(entry["command"], "/dusty");
         assert_eq!(entry["env"][0]["value"], "/socket");
     }
 
@@ -356,7 +361,7 @@ mod tests {
                     requests.push(request);
                     break;
                 }
-                assert!(Instant::now() < deadline, "call did not reach Dust");
+                assert!(Instant::now() < deadline, "call did not reach Dusty");
                 thread::yield_now();
             }
         }
@@ -369,7 +374,10 @@ mod tests {
         )
         .unwrap();
         while !requests[0].reply.is_cancelled() {
-            assert!(Instant::now() < deadline, "cancellation did not reach Dust");
+            assert!(
+                Instant::now() < deadline,
+                "cancellation did not reach Dusty"
+            );
             thread::yield_now();
         }
         assert!(!requests[1].reply.is_cancelled());

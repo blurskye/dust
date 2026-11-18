@@ -1,6 +1,6 @@
 # Architecture
 
-Dust is one Rust package with a terminal executable and a library. The library
+Dusty is one Rust package with a terminal executable and a library. The library
 contains the editing model, application, protocol clients, workers and renderer.
 `src/main.rs` parses command-line options, handles noninteractive commands, loads
 configuration and starts the application. `src/lib.rs` lists the modules.
@@ -28,7 +28,7 @@ Paths in this table are under `src/`.
 | `persistence/` | Saved session/history records and asynchronous state I/O. |
 | `telemetry/` | Bounded logs, health snapshots and crash-report data. |
 | `ui/` | Terminal lifecycle and events, Unicode cell grids, frame differences, Markdown layout, PTY screen state and rendering. |
-| `remote.rs` | IPC for `dust --remote` and requests from programs Dust launches. |
+| `remote.rs` | IPC for `dusty --remote` and requests from programs Dusty launches. |
 | `clock.rs` | Clock and ID sources, including deterministic test implementations. |
 | `api/` | Public API manifests and compatibility checks for commands, configuration, persistence, tools and WIT. |
 | `testing/` | Test-only headless drivers that exercise production editor and application paths. |
@@ -152,12 +152,12 @@ coordinates parsing and projects accepted results for display.
 
 ## Plugins and permissions
 
-The production interface is [`wit/dust-plugin.wit`](wit/dust-plugin.wit), package
-`dust:plugin@0.4.0`, world `editor-plugin`. This ABI version is separate from the
+The production interface is [`wit/dusty-plugin.wit`](wit/dusty-plugin.wit), package
+`dusty:plugin@0.4.0`, world `editor-plugin`. This ABI version is separate from the
 editor's release version. The [Plugin SDK](docs/plugin-sdk.md) specifies manifests,
 limits and request semantics.
 
-`plugins/scaffold.rs` creates standalone Rust guests for `dust plugin new`, using
+`plugins/scaffold.rs` creates standalone Rust guests for `dusty plugin new`, using
 `examples/plugins/completion` and `assets/plugin-template/README.md` as templates.
 `app/plugins/browser.rs` lists configured and package-managed plugins in the native
 picker and routes session enable/disable, reload and folder actions to existing

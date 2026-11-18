@@ -932,7 +932,7 @@ fn recovery_worker_fifo_order_makes_delete_the_revision_barrier() {
 pub(super) fn isolated_git_test() -> bool {
     let thread = std::thread::current();
     let name = thread.name().expect("test name");
-    if std::env::var("DUST_ISOLATED_GIT_TEST").as_deref() == Ok(name) {
+    if std::env::var("DUSTY_ISOLATED_GIT_TEST").as_deref() == Ok(name) {
         return true;
     }
     let home = tempdir().expect("test home");
@@ -940,7 +940,7 @@ pub(super) fn isolated_git_test() -> bool {
     fs::write(&config, "").expect("empty Git config");
     let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
         .args(["--exact", name, "--nocapture"])
-        .env("DUST_ISOLATED_GIT_TEST", name)
+        .env("DUSTY_ISOLATED_GIT_TEST", name)
         .env("HOME", home.path())
         .env("USERPROFILE", home.path())
         .env("XDG_CONFIG_HOME", home.path())

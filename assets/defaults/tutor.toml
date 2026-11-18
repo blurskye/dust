@@ -174,16 +174,16 @@ keys = "lxfpxwwllx"
 chapter = "Changing text"
 text = "`i` types before the cursor and `a` after it; `esc` goes back to Normal mode."
 press = "Press `w` three times to reach “editor”, then `i`, type `fast ` and press `esc`."
-at = "Dust is a editor"
-line = "Dust is a fast editor"
+at = "Dusty is a editor"
+line = "Dusty is a fast editor"
 keys = "wwwifast <escape>"
 
 [[step]]
 chapter = "Changing text"
 text = "`A` types at the end of the line."
 press = "Press `A`, type ` terminal.` and press `esc`."
-at = "Dust runs in a"
-line = "Dust runs in a terminal."
+at = "Dusty runs in a"
+line = "Dusty runs in a terminal."
 keys = "A terminal.<escape>"
 
 [[step]]
@@ -247,11 +247,11 @@ keys = 'fhci"hi<escape>'
 [[step]]
 chapter = "Changing text"
 text = "`r` replaces one character without leaving Normal mode."
-press = "Press `e` to reach the k of “Dusk”, then `r` `t`."
-at = "Dusk is fast."
-mark = "Dusk"
-line = "Dust is fast."
-keys = "ert"
+press = "Press `e` to reach the last s of “Dusts”, then `r` `y`."
+at = "Dusts is fast."
+mark = "Dusts"
+line = "Dusty is fast."
+keys = "ery"
 
 [[step]]
 chapter = "Changing text"
@@ -536,7 +536,7 @@ keys = "<leader><space><wait><escape><escape>"
 
 [[step]]
 chapter = "Files"
-text = "Dust remembers the files you opened."
+text = "Dusty remembers the files you opened."
 press = "Press `<leader>` `f` `r` to list recent files, then `esc` `esc` to close it."
 done = ["navigation.recents"]
 keys = "<leader>fr<escape><escape>"
@@ -704,7 +704,7 @@ keys = "<leader><tab>d"
 
 [[step]]
 chapter = "Terminal"
-text = "Dust runs nothing from a project, not even a terminal in it, until you trust the project. `:untrust` takes it back."
+text = "Dusty runs nothing from a project, not even a terminal in it, until you trust the project. `:untrust` takes it back."
 press = "Type `:trust`, press `enter` and answer yes."
 done = ["workspace.trust"]
 keys = ":trust<enter><wait><enter><wait>"
@@ -968,7 +968,7 @@ keys = "<f9>"
 
 [[step]]
 chapter = "Debugging"
-text = "`<leader>` `d` `B` gives a breakpoint a condition, so it only stops when, say, `name == \"Dust\"`."
+text = "`<leader>` `d` `B` gives a breakpoint a condition, so it only stops when, say, `name == \"Dusty\"`."
 press = "Press `<leader>` `d` `B` (capital B) to see the question, then `esc`."
 done = ["dap.breakpoint.configure"]
 open = "{main}"
@@ -1033,7 +1033,7 @@ keys = "<leader>cm<escape>"
 
 [[step]]
 chapter = "Tools"
-text = "`:health` checks Dust itself: its folders, the clipboard, the terminal and the tools it found."
+text = "`:health` checks Dusty itself: its folders, the clipboard, the terminal and the tools it found."
 press = "Type `:health` and press `enter`."
 done = ["health.open"]
 keys = ":health<enter>"
@@ -1094,7 +1094,7 @@ keys = "<leader>ghu<wait>"
 
 [[step]]
 chapter = "Git"
-text = "Resetting a change throws it away and puts back what was committed, so Dust asks you to type that you mean it."
+text = "Resetting a change throws it away and puts back what was committed, so Dusty asks you to type that you mean it."
 press = "Press `<leader>` `g` `h` `r`, type `reset this hunk` and press `enter`."
 open = "{greet}"
 at = "Hello there, "
@@ -1260,14 +1260,14 @@ keys = ":setup<enter><escape>"
 
 [[step]]
 chapter = "Settings and keys"
-text = "`:config explain` says what a setting is set to and where that came from: Dust's defaults, your config.toml or the project's."
+text = "`:config explain` says what a setting is set to and where that came from: Dusty's defaults, your config.toml or the project's."
 press = "Type `:config explain editor.wrap` and press `enter`."
 done = ["config.explain"]
 keys = ":config explain editor.wrap<enter>"
 
 [[step]]
 chapter = "Settings and keys"
-text = "Dust reloads config.toml and keymaps.toml when you save them; `:config reload` does it by hand."
+text = "Dusty reloads config.toml and keymaps.toml when you save them; `:config reload` does it by hand."
 press = "Type `:config reload` and press `enter`."
 done = ["config.reload"]
 keys = ":config reload<enter><wait>"
@@ -1331,7 +1331,7 @@ keys = "<f1><ctrl-o><escape><escape><escape><escape>"
 
 [[step]]
 chapter = "Help"
-text = "Every message Dust showed is kept: `<leader>` `n` lists them, newest first."
+text = "Every message Dusty showed is kept: `<leader>` `n` lists them, newest first."
 press = "Press `<leader>` `n`, then `esc` `esc` to close the list."
 done = ["application.notifications.open"]
 keys = "<leader>n<escape><escape>"
@@ -1345,7 +1345,7 @@ keys = ":plugins<enter><escape><escape>"
 
 [[step]]
 chapter = "Saving"
-text = "`:w` saves, `:q` quits Dust and `:wq` saves and quits. `ctrl-s` saves too."
+text = "`:w` saves, `:q` quits Dusty and `:wq` saves and quits. `ctrl-s` saves too."
 press = "Type `:w` and press `enter` to save {practice}."
 done = ["file.save"]
 open = "{practice}"
@@ -1353,6 +1353,6 @@ keys = ":w<enter>"
 
 [[step]]
 chapter = "Done"
-text = "That's the tour! Your settings go in ~/.config/dust/config.toml and your keys in keymaps.toml, only what you change. `:Tutor` starts this again any time, and `:TutorChapters` jumps to one chapter."
+text = "That's the tour! Your settings go in ~/.config/dusty/config.toml and your keys in keymaps.toml, only what you change. `:Tutor` starts this again any time, and `:TutorChapters` jumps to one chapter."
 press = "Type `:TutorNext` and press `enter` to finish."
 keys = ":TutorNext<enter>"

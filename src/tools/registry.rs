@@ -29,7 +29,7 @@ use std::thread;
 use std::time::Duration;
 use thiserror::Error;
 
-pub const OFFICIAL_REGISTRY: &str = "https://dust.blurskye.dev/registry/v1";
+pub const OFFICIAL_REGISTRY: &str = "https://dusty.blurskye.dev/registry/v1";
 
 /// Network and cache limits for the official package registry.
 #[derive(Clone, Debug)]
@@ -139,7 +139,7 @@ impl RegistryWorker {
         let (tx, rx) = mpsc::sync_channel::<(u64, RegistryRequest)>(capacity);
         let (etx, erx) = mpsc::sync_channel(capacity);
         thread::Builder::new()
-            .name("dust-registry".into())
+            .name("dusty-registry".into())
             .spawn(move || {
                 let client = RegistryClient::new(policy, cache);
                 while let Ok((id, request)) = rx.recv() {

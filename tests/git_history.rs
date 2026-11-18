@@ -1,9 +1,9 @@
 //! Pull, undo and redo, history rewriting and tag push from the Git tab,
 //! on temporary repositories and local bare remotes only.
-use dust::config::{GitKeys, load_bundled_config};
-use dust::editor::input::{KeyCode, KeyEvent, Modifiers};
-use dust::git::screen::GitScreen;
-use dust::ui::{KeyInputKind, UiEvent};
+use dusty::config::{GitKeys, load_bundled_config};
+use dusty::editor::input::{KeyCode, KeyEvent, Modifiers};
+use dusty::git::screen::GitScreen;
+use dusty::ui::{KeyInputKind, UiEvent};
 use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -515,7 +515,7 @@ fn a_browsed_branch_lists_its_log_in_the_reader_and_history_follows_it() {
     assert!(!browsing.contains("Its log is in the reader"), "{browsing}");
     // The panes keep their rectangles: browsing folds nothing.
     let after = screen.frame(120, 36).grid;
-    let corners = |grid: &dust::ui::CellGrid| {
+    let corners = |grid: &dusty::ui::CellGrid| {
         (0..36)
             .filter(|&y| grid.row_text(y).starts_with('╭'))
             .collect::<Vec<_>>()
@@ -596,21 +596,21 @@ fn y_copies_a_commit_attribute_and_o_needs_a_forge_remote() {
     };
     assert_eq!(
         copied(&mut screen),
-        dust::git::screen::ScreenOutcome::Copy(head.clone())
+        dusty::git::screen::ScreenOutcome::Copy(head.clone())
     );
     shows(&mut screen, "Copied the SHA");
     key(&mut screen, KeyCode::Char('y'));
     key(&mut screen, KeyCode::Char('j'));
     assert_eq!(
         copied(&mut screen),
-        dust::git::screen::ScreenOutcome::Copy(short(&head).to_owned())
+        dusty::git::screen::ScreenOutcome::Copy(short(&head).to_owned())
     );
     key(&mut screen, KeyCode::Char('y'));
     key(&mut screen, KeyCode::Down);
     key(&mut screen, KeyCode::Down);
     assert_eq!(
         copied(&mut screen),
-        dust::git::screen::ScreenOutcome::Copy("bravo".into())
+        dusty::git::screen::ScreenOutcome::Copy("bravo".into())
     );
 }
 
@@ -640,7 +640,7 @@ fn the_commit_box_shows_its_visual_selection_and_verbs_and_sheets_clear_the_pane
     key(&mut screen, KeyCode::Escape);
     // A centred sheet dims the panes behind it, and a blank cell keeps panel text off
     // its edge: no `Ta╭─`.
-    let branches = |frame: &dust::ui::Frame| {
+    let branches = |frame: &dusty::ui::Frame| {
         (0..40u16)
             .find_map(|y| {
                 let row = frame.grid.row_text(y);

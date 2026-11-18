@@ -281,7 +281,7 @@ pub enum AppEffect {
     PluginCall {
         plugin: String,
         handler: String,
-        call: Box<crate::plugins::component::component_api::dust::plugin::host::CommandCall>,
+        call: Box<crate::plugins::component::component_api::dusty::plugin::host::CommandCall>,
         pending: Option<PendingCommandId>,
         previous: Option<Box<CommandOutcome<AppEffect>>>,
     },

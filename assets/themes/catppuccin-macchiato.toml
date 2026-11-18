@@ -1,4 +1,4 @@
-# Dust semantic-role port; palette attribution: README.md and ../../LICENSES/MIT-catppuccin.txt
+# Dusty semantic-role port; palette attribution: README.md and ../../LICENSES/MIT-catppuccin.txt
 name = "catppuccin-macchiato"
 
 [styles.default]

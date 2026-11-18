@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Opt-in qualification for Dust's private NixOS compatibility runtime. The test
+# Opt-in qualification for Dusty's private NixOS compatibility runtime. The test
 # realizes the generic locked runtime in an isolated state store, installs all
 # checksum-pinned upstream LSP artifacts through the real Rust installer, and
 # proves initialize, completion (where deterministic), shutdown, and exit for
-# every Dust-managed catalog server. Mason-parity discovery-only definitions
+# every Dusty-managed catalog server. Mason-parity discovery-only definitions
 # are qualified structurally and launch only when their executable is on PATH. It
 # needs Nix, Cargo, and upstream/cache network access; it never needs root or a
 # project flake and never writes the bundled lock file.
@@ -24,4 +24,4 @@ cargo test --locked --lib \
     tools::tests::nixos_runtime_completes_protocol_smoke_for_every_managed_catalog_lsp \
     -- --ignored --exact --nocapture
 test "$lock_before" = "$(sha256sum assets/tools/nix-workspace/flake.lock)"
-printf 'Dust private Nix runtime qualified for all managed catalog LSP protocol sessions.\n'
+printf 'Dusty private Nix runtime qualified for all managed catalog LSP protocol sessions.\n'

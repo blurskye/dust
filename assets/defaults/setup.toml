@@ -1,4 +1,4 @@
-# The questions Dust asks the first time it starts, and again on :setup. Each choice sets
+# The questions Dusty asks the first time it starts, and again on :setup. Each choice sets
 # the settings it lists in your config.toml; the Settings page (ctrl-,) changes them later.
 # `preview` names what the small editor beside the choices shows open: the layout, the
 # terminal, the agent or the leader key's shortcuts.
@@ -67,12 +67,12 @@ settings = { "ui.git.placement" = "fullscreen" }
 
 [[page]]
 title = "AI agent"
-question = "How should Dust run your AI agent (<leader> a a)?"
+question = "How should Dusty run your AI agent (<leader> a a)?"
 preview = "agent"
 
 [[page.choice]]
-label = "Dust's agent panel"
-about = "Dust shows the conversation and its edits, through ACP."
+label = "Dusty's agent panel"
+about = "Dusty shows the conversation and its edits, through ACP."
 settings = { "agents.connection" = "acp" }
 
 [[page.choice]]
@@ -94,12 +94,12 @@ settings = { "agents.default" = "" }
 
 [[page]]
 title = "Agent tools"
-question = "May Dust add its tools, such as subagents, to agents that keep them in their own config?"
+question = "May Dusty add its tools, such as subagents, to agents that keep them in their own config?"
 preview = "agent"
 
 [[page.choice]]
 label = "Yes, add them"
-about = "For pi, Dust runs pi mcp add dust … before pi starts."
+about = "For pi, Dusty runs pi mcp add dusty … before pi starts."
 settings = { "agents.add_tools" = true }
 
 [[page.choice]]

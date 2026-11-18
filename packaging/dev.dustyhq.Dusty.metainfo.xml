@@ -1,22 +1,22 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="console-application">
-  <id>dev.blurskye.Dust</id>
+  <id>dev.dustyhq.Dusty</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
-  <name>Dust</name>
+  <name>Dusty</name>
   <summary>Terminal IDE with Vim keys, language servers, git and coding agents</summary>
   <description>
     <p>
-      Dust is a terminal IDE that works like LazyVim out of the box: Vim editing, a file
+      Dusty is a terminal IDE that works like LazyVim out of the box: Vim editing, a file
       explorer, fuzzy finding, language servers, debugging, git, terminals and coding
       agents, with no configuration needed.
     </p>
   </description>
-  <launchable type="desktop-id">dev.blurskye.Dust.desktop</launchable>
+  <launchable type="desktop-id">dev.dustyhq.Dusty.desktop</launchable>
   <url type="homepage">https://github.com/dustyhq/dusty</url>
   <url type="bugtracker">https://github.com/dustyhq/dusty/issues</url>
   <provides>
-    <binary>dust</binary>
+    <binary>dusty</binary>
   </provides>
   <categories>
     <category>Development</category>
@@ -24,6 +24,7 @@
   </categories>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.4.0" date="2026-11-18"/>
     <release version="0.3.1" date="2026-11-16"/>
     <release version="0.2.1" date="2026-11-08"/>
     <release version="0.2.0" date="2026-11-07"/>

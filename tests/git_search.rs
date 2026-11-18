@@ -1,7 +1,7 @@
 //! Source find through the public native input/frame boundary, against real repositories.
-use dust::editor::input::{KeyCode, KeyEvent, Modifiers};
-use dust::git::screen::{GitScreen, ScreenOutcome};
-use dust::ui::{Emphasis, Frame, GitRole, GitSurface, KeyInputKind, Style, UiEvent};
+use dusty::editor::input::{KeyCode, KeyEvent, Modifiers};
+use dusty::git::screen::{GitScreen, ScreenOutcome};
+use dusty::ui::{Emphasis, Frame, GitRole, GitSurface, KeyInputKind, Style, UiEvent};
 use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, Instant};

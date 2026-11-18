@@ -10,29 +10,29 @@
 #[path = "support/forge_fake.rs"]
 mod forge_fake;
 
-use dust::forge::capability::Cap;
-use dust::forge::capability::StepsKind;
-use dust::forge::cli::CliTransport;
-use dust::forge::credential::Credential;
-use dust::forge::credential::CredentialSource;
-use dust::forge::credential::Env;
-use dust::forge::credential::Secret;
-use dust::forge::detect;
-use dust::forge::http::HttpTransport;
-use dust::forge::model::*;
-use dust::forge::provider;
-use dust::forge::provider::Conditional;
-use dust::forge::provider::Fetched;
-use dust::forge::provider::ForgeContext;
-use dust::forge::provider::Provider;
-use dust::forge::provider::ProviderKind;
-use dust::forge::provider::RepoRef;
-use dust::forge::request::*;
-use dust::forge::transport::Cli;
-use dust::forge::transport::ConnectOptions;
-use dust::forge::transport::Endpoints;
-use dust::forge::transport::HostKey;
-use dust::forge::transport::Transport;
+use dusty::forge::capability::Cap;
+use dusty::forge::capability::StepsKind;
+use dusty::forge::cli::CliTransport;
+use dusty::forge::credential::Credential;
+use dusty::forge::credential::CredentialSource;
+use dusty::forge::credential::Env;
+use dusty::forge::credential::Secret;
+use dusty::forge::detect;
+use dusty::forge::http::HttpTransport;
+use dusty::forge::model::*;
+use dusty::forge::provider;
+use dusty::forge::provider::Conditional;
+use dusty::forge::provider::Fetched;
+use dusty::forge::provider::ForgeContext;
+use dusty::forge::provider::Provider;
+use dusty::forge::provider::ProviderKind;
+use dusty::forge::provider::RepoRef;
+use dusty::forge::request::*;
+use dusty::forge::transport::Cli;
+use dusty::forge::transport::ConnectOptions;
+use dusty::forge::transport::Endpoints;
+use dusty::forge::transport::HostKey;
+use dusty::forge::transport::Transport;
 use forge_fake::FAKE_TOKEN;
 use forge_fake::ForgeServer;
 use serde_json::Value;
@@ -1140,7 +1140,7 @@ fn viewed_files_stay_on_this_computer() {
 fn ide_picker_lists_codeberg_pull_requests() {
     if std::env::var_os(CHILD).is_some() {
         let root = PathBuf::from(std::env::var_os("DUSTY_GITEA_REPO").unwrap());
-        let mut jobs = dust::forge::ForgeJobs::default();
+        let mut jobs = dusty::forge::ForgeJobs::default();
         jobs.list(root, 1).unwrap();
         let deadline = Instant::now() + std::time::Duration::from_secs(30);
         let reply = loop {
@@ -1151,7 +1151,7 @@ fn ide_picker_lists_codeberg_pull_requests() {
             std::thread::sleep(std::time::Duration::from_millis(5));
         };
         let list = match reply {
-            dust::forge::ForgeReply::List(Ok(list)) => list,
+            dusty::forge::ForgeReply::List(Ok(list)) => list,
             other => panic!("the picker failed: {other:?}"),
         };
         assert_eq!(list.len(), 10, "{list:?}");
@@ -1194,7 +1194,7 @@ fn ide_picker_lists_codeberg_pull_requests() {
                 .env("XDG_CONFIG_HOME", home.join(".config"))
                 .env("XDG_DATA_HOME", home.join(".local/share"))
                 .env("XDG_STATE_HOME", home.join(".local/state"))
-                .env("DUST_CONFIG_HOME", &config)
+                .env("DUSTY_CONFIG_HOME", &config)
                 .env("DUSTY_FORGE_TEA", &tea)
                 .env("DUSTY_FORGE_GH", directory.path().join("bin/no-gh"));
             if via == Via::Http {

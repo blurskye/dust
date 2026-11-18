@@ -142,7 +142,7 @@ impl Default for ForgeJobs {
             replies,
             worker: None,
             cancelled: Arc::new(AtomicBool::new(false)),
-            name: "dust-forge",
+            name: "dusty-forge",
         }
     }
 }
@@ -155,13 +155,13 @@ impl ForgeJobs {
     /// stays free for what the user is looking at.
     pub fn warm() -> Self {
         let mut jobs = Self::default();
-        jobs.name = "dust-forge-warm";
+        jobs.name = "dusty-forge-warm";
         jobs
     }
 
     /// The warm worker: its reads are background work (held back sooner while anonymous).
     pub fn warming(&self) -> bool {
-        self.name == "dust-forge-warm"
+        self.name == "dusty-forge-warm"
     }
 
     pub fn busy(&self) -> bool {
@@ -451,7 +451,7 @@ impl ForgeCommands<'_> {
             .collect())
     }
 
-    /// The pull request of the current branch: `pr-N` (Dust's own checkout), a branch whose
+    /// The pull request of the current branch: `pr-N` (Dusty's own checkout), a branch whose
     /// upstream is `refs/pull/N/head` or `refs/merge-requests/N/head` (a fork checkout), else
     /// the forge's open pull request for the upstream branch name.
     fn current_number(
@@ -806,7 +806,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn forge_commands_disable_prompts_and_bound_output() {
-        const FIXTURE: &str = "DUST_FORGE_SSH_FIXTURE";
+        const FIXTURE: &str = "DUSTY_FORGE_SSH_FIXTURE";
         if std::env::var_os(FIXTURE).is_none() {
             let output = std::process::Command::new(std::env::current_exe().unwrap())
                 .args([

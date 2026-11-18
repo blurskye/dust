@@ -49,7 +49,7 @@ impl StructuredLogs {
             let (tx, rx) = mpsc::sync_channel::<LogRecord>(queue.clamp(1, 4096));
             let worker_policy = policy.clone();
             thread::Builder::new()
-                .name("dust-logs".into())
+                .name("dusty-logs".into())
                 .spawn(move || {
                     while let Ok(record) = rx.recv() {
                         let _ = write_record(&path, &record, &worker_policy);
@@ -164,7 +164,7 @@ impl CrashSnapshotWriter {
         let (sender, receiver) = mpsc::sync_channel(1);
         let (results_sender, results) = mpsc::sync_channel(1);
         thread::Builder::new()
-            .name("dust-crash-snapshot".into())
+            .name("dusty-crash-snapshot".into())
             .spawn(move || {
                 while let Ok(snapshot) = receiver.recv() {
                     let result = write_live_snapshot(&path, &snapshot)
@@ -278,7 +278,7 @@ mod tests {
     #[test]
     fn failed_log_rotation_does_not_append() {
         let root = tempfile::tempdir().unwrap();
-        let path = root.path().join("dust.jsonl");
+        let path = root.path().join("dusty.jsonl");
         let record = LogRecord {
             timestamp_ms: 0,
             level: LogLevel::Info,
@@ -305,7 +305,7 @@ mod tests {
     #[test]
     fn concurrent_log_writers_keep_records_and_rotation_intact() {
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("dust.jsonl");
+        let path = directory.path().join("dusty.jsonl");
         let policy = LogPolicy {
             maximum_records: 1000,
             maximum_field_bytes: 8192,

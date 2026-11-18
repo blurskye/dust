@@ -103,16 +103,16 @@ pub enum ToolInstall {
         prefix: String,
         entrypoint: String,
     },
-    /// Exact npm-registry packages in a Dust-owned Bun prefix. Bun is either a
-    /// checked Dust-managed runtime or a directly runnable user-provided binary
+    /// Exact npm-registry packages in a Dusty-owned Bun prefix. Bun is either a
+    /// checked Dusty-managed runtime or a directly runnable user-provided binary
     /// (including one supplied by a Nix development shell). The package installer
     /// never invokes npm, Node, or a distribution package manager.
     NpmPackage { packages: Vec<String> },
-    /// Python packages in a Dust-owned uv environment.
+    /// Python packages in a Dusty-owned uv environment.
     UvTool { packages: Vec<String> },
-    /// A Go module built by a Dust-owned Go toolchain.
+    /// A Go module built by a Dusty-owned Go toolchain.
     GoPackage { package: String },
-    /// A Rust component added by a Dust-owned rustup installation.
+    /// A Rust component added by a Dusty-owned rustup installation.
     RustupComponent { component: String },
 }
 
@@ -136,7 +136,7 @@ pub struct ToolDefinition {
     pub kind: ToolKind,
     pub languages: Vec<String>,
     pub executable: String,
-    /// Exact executable/package version for the default Dust-managed artifact.
+    /// Exact executable/package version for the default Dusty-managed artifact.
     #[serde(default)]
     pub version: Option<String>,
     /// Upstream release/build identifier when it differs from `version`.
@@ -160,7 +160,7 @@ pub struct ToolDefinition {
     pub project_root_strategy: ProjectRootStrategy,
     #[serde(default)]
     pub install: Option<ToolInstall>,
-    /// Additional exact, checksum/package-pinned versions that Dust can install.
+    /// Additional exact, checksum/package-pinned versions that Dusty can install.
     #[serde(default)]
     pub pins: Vec<ToolVersionPin>,
 }
@@ -387,8 +387,8 @@ pub fn tool_store_root() -> PathBuf {
 
 /// Whether this Linux host is NixOS, determined once from the standard OS identity file.
 ///
-/// The result selects how Dust runs the same verified upstream artifact: directly on
-/// ordinary Linux, or through Dust's locked private Nix compatibility runtime on NixOS.
+/// The result selects how Dusty runs the same verified upstream artifact: directly on
+/// ordinary Linux, or through Dusty's locked private Nix compatibility runtime on NixOS.
 /// An unreadable or malformed file fails closed to the portable direct-artifact policy.
 #[must_use]
 pub fn is_nixos_host() -> bool {
@@ -432,7 +432,7 @@ pub(super) fn nixos_os_release_at(path: &Path) -> bool {
     })
 }
 
-/// Dust owns this flake and its lock file; it is never sourced from a project.
+/// Dusty owns this flake and its lock file; it is never sourced from a project.
 #[must_use]
 pub fn nix_lsp_workspace_root() -> PathBuf {
     tool_store_root().join("nix-lsp-workspace")
@@ -487,7 +487,7 @@ pub(super) fn managed_executable(root: &Path, definition: &ToolDefinition) -> Op
     executable_file(&candidate).then_some(candidate)
 }
 
-/// Returns the executable installed in Dust's private tool store, independently
+/// Returns the executable installed in Dusty's private tool store, independently
 /// from a same-named executable discovered on PATH.
 #[must_use]
 pub fn managed_tool_executable(definition: &ToolDefinition) -> Option<PathBuf> {
@@ -550,7 +550,7 @@ fn managed_formatter_at(
         })
 }
 
-pub(super) const MANAGED_TOOL_VERSION_FILE: &str = ".dust-version";
+pub(super) const MANAGED_TOOL_VERSION_FILE: &str = ".dusty-version";
 pub(super) const MAXIMUM_MANAGED_TOOL_VERSION_BYTES: u64 = 256;
 
 pub(super) fn managed_tool_installed_version_at(
@@ -667,68 +667,68 @@ pub(super) fn parse_nix_runtime_environment(
     profile: &Path,
 ) -> Result<NixCompatibilityRuntime, String> {
     if !nix_profile_installed_at(profile) {
-        return Err("Dust Nix compatibility profile is not installed".into());
+        return Err("Dusty Nix compatibility profile is not installed".into());
     }
     let path = profile.join(NIX_RUNTIME_ENVIRONMENT_FILE);
     let metadata = fs::metadata(&path)
-        .map_err(|error| format!("cannot inspect Dust Nix runtime metadata: {error}"))?;
+        .map_err(|error| format!("cannot inspect Dusty Nix runtime metadata: {error}"))?;
     if !metadata.file_type().is_file() || metadata.len() > MAXIMUM_NIX_RUNTIME_ENVIRONMENT_BYTES {
-        return Err("Dust Nix runtime metadata is not a bounded regular file".into());
+        return Err("Dusty Nix runtime metadata is not a bounded regular file".into());
     }
     let text = fs::read_to_string(&path)
-        .map_err(|error| format!("cannot read Dust Nix runtime metadata: {error}"))?;
+        .map_err(|error| format!("cannot read Dusty Nix runtime metadata: {error}"))?;
     let mut values = BTreeMap::new();
     for line in text.lines() {
         let (key, value) = line
             .split_once('=')
-            .ok_or("Dust Nix runtime metadata is malformed")?;
+            .ok_or("Dusty Nix runtime metadata is malformed")?;
         if !matches!(
             key,
-            "DUST_NIX_RUNTIME_ID"
-                | "DUST_NIX_LOADER"
-                | "DUST_NIX_LD"
-                | "DUST_NIX_PATCHELF"
-                | "DUST_NIX_LIBRARY_PATH"
-                | "DUST_NIX_RUNTIME_PATH"
+            "DUSTY_NIX_RUNTIME_ID"
+                | "DUSTY_NIX_LOADER"
+                | "DUSTY_NIX_LD"
+                | "DUSTY_NIX_PATCHELF"
+                | "DUSTY_NIX_LIBRARY_PATH"
+                | "DUSTY_NIX_RUNTIME_PATH"
         ) || value.is_empty()
             || value.chars().any(char::is_control)
             || values.insert(key, value).is_some()
         {
-            return Err("Dust Nix runtime metadata is invalid".into());
+            return Err("Dusty Nix runtime metadata is invalid".into());
         }
     }
-    if values.get("DUST_NIX_RUNTIME_ID").copied() != Some(NIX_COMPATIBILITY_RUNTIME_ID) {
-        return Err("Dust Nix runtime profile is from an incompatible revision".into());
+    if values.get("DUSTY_NIX_RUNTIME_ID").copied() != Some(NIX_COMPATIBILITY_RUNTIME_ID) {
+        return Err("Dusty Nix runtime profile is from an incompatible revision".into());
     }
     let path_value = |key: &str| -> Result<PathBuf, String> {
         let value = PathBuf::from(
             *values
                 .get(key)
-                .ok_or("Dust Nix runtime metadata is incomplete")?,
+                .ok_or("Dusty Nix runtime metadata is incomplete")?,
         );
         if !valid_nix_store_path(&value) || !value.is_file() {
-            return Err(format!("Dust Nix runtime {key} path is unavailable"));
+            return Err(format!("Dusty Nix runtime {key} path is unavailable"));
         }
         Ok(value)
     };
     let list_value = |key: &str| -> Result<String, String> {
         let value = *values
             .get(key)
-            .ok_or("Dust Nix runtime metadata is incomplete")?;
+            .ok_or("Dusty Nix runtime metadata is incomplete")?;
         if value.split(':').any(|entry| {
             let path = Path::new(entry);
             entry.is_empty() || !valid_nix_store_path(path) || !path.is_dir()
         }) {
-            return Err(format!("Dust Nix runtime {key} contains an invalid path"));
+            return Err(format!("Dusty Nix runtime {key} contains an invalid path"));
         }
         Ok(value.into())
     };
     Ok(NixCompatibilityRuntime {
-        loader: path_value("DUST_NIX_LOADER")?,
-        nix_ld: path_value("DUST_NIX_LD")?,
-        patchelf: path_value("DUST_NIX_PATCHELF")?,
-        library_path: list_value("DUST_NIX_LIBRARY_PATH")?,
-        runtime_path: list_value("DUST_NIX_RUNTIME_PATH")?,
+        loader: path_value("DUSTY_NIX_LOADER")?,
+        nix_ld: path_value("DUSTY_NIX_LD")?,
+        patchelf: path_value("DUSTY_NIX_PATCHELF")?,
+        library_path: list_value("DUSTY_NIX_LIBRARY_PATH")?,
+        runtime_path: list_value("DUSTY_NIX_RUNTIME_PATH")?,
     })
 }
 
@@ -737,7 +737,7 @@ pub(super) fn nix_lsp_runtime_at(
     definition: &ToolDefinition,
 ) -> Result<NixCompatibilityRuntime, String> {
     let profile = nix_lsp_profile_path_at(root, definition)
-        .ok_or("this LSP has no Dust Nix compatibility profile")?;
+        .ok_or("this LSP has no Dusty Nix compatibility profile")?;
     parse_nix_runtime_environment(&profile)
 }
 
@@ -759,7 +759,7 @@ pub(crate) fn nix_lsp_launch_environment_at(
     if let Some(existing) = env::var_os("PATH") {
         paths.extend(env::split_paths(&existing));
     }
-    let path = env::join_paths(paths).map_err(|_| "Dust Nix runtime PATH is invalid")?;
+    let path = env::join_paths(paths).map_err(|_| "Dusty Nix runtime PATH is invalid")?;
     environment.insert("PATH".into(), path);
     Ok(environment)
 }
@@ -771,15 +771,15 @@ pub(crate) fn nix_lsp_launch_environment_for_workspace_at(
     if !workspace.is_absolute()
         || workspace.file_name().and_then(|name| name.to_str()) != Some("nix-lsp-workspace")
     {
-        return Err("Dust Nix compatibility workspace path is invalid".into());
+        return Err("Dusty Nix compatibility workspace path is invalid".into());
     }
     let root = workspace
         .parent()
-        .ok_or("Dust Nix compatibility workspace has no private tool root")?;
+        .ok_or("Dusty Nix compatibility workspace has no private tool root")?;
     nix_lsp_launch_environment_at(root, definition)
 }
 
-/// Environment for a verified upstream LSP processed by Dust's private Nix runtime.
+/// Environment for a verified upstream LSP processed by Dusty's private Nix runtime.
 pub fn nix_lsp_launch_environment(
     definition: &ToolDefinition,
 ) -> Result<BTreeMap<String, OsString>, String> {
@@ -824,7 +824,7 @@ fn install_readiness(definition: &ToolDefinition, on_path: &PathExecutables) -> 
                 && (!fhs_glibc_loader_available() || runtime_artifact("bun").is_err()) =>
         {
             Some(
-                "requires a directly runnable Bun runtime, Dust's private Nix runtime on NixOS, or an FHS glibc Linux host"
+                "requires a directly runnable Bun runtime, Dusty's private Nix runtime on NixOS, or an FHS glibc Linux host"
                     .into(),
             )
         }
@@ -849,7 +849,7 @@ pub fn inspect_tools_at(root: &Path) -> Vec<ToolEntry> {
     bundled_tool_catalog()
         .into_iter()
         .map(|definition| {
-            // PATH is intentionally first priority. A Dust-managed installation
+            // PATH is intentionally first priority. A Dusty-managed installation
             // remains independently selectable in the interactive runtime picker.
             let status = on_path
                 .find(&definition.executable)
@@ -959,7 +959,7 @@ mod tests {
         let executable = std::env::current_exe().unwrap();
         let name = executable.file_name().unwrap().to_str().unwrap();
         // Run in a child so parallel tests never observe changed PATH or cwd.
-        const CHILD: &str = "DUST_TEST_EMPTY_PATH";
+        const CHILD: &str = "DUSTY_TEST_EMPTY_PATH";
         if std::env::var_os(CHILD).is_some() {
             let scanned = PathExecutables::scan();
             assert_eq!(scanned.find(name), discover_executable(name));
@@ -1021,7 +1021,7 @@ mod tests {
     fn managed_formatter_preserves_native_paths_in_arguments_and_environment() {
         use std::os::unix::ffi::OsStringExt;
         let directory = tempfile::tempdir().unwrap();
-        const CHILD: &str = "DUST_TEST_NATIVE_TOOL_PATH";
+        const CHILD: &str = "DUSTY_TEST_NATIVE_TOOL_PATH";
         if std::env::var_os(CHILD).is_none() {
             let mut path = OsString::from_vec(b"missing-\xff:".to_vec());
             path.push(std::env::var_os("PATH").unwrap_or_default());

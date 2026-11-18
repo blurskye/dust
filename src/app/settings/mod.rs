@@ -375,7 +375,7 @@ impl App {
         }
         let result = match self.configuration.user_settings_path() {
             None => {
-                Err("Dust started without a user configuration, so nothing can be saved".into())
+                Err("Dusty started without a user configuration, so nothing can be saved".into())
             }
             Some(path) => write_user_setting(&path, key, value).and_then(|()| {
                 self.configuration
@@ -384,7 +384,7 @@ impl App {
             }),
         };
         let status = match &result {
-            Ok(()) if restart => ("Saved. Restart Dust to apply it".into(), false),
+            Ok(()) if restart => ("Saved. Restart Dusty to apply it".into(), false),
             Ok(()) => ("Saved".into(), false),
             Err(error) => (error.clone(), true),
         };

@@ -1,7 +1,7 @@
 //! An editable directory: stable IDs identify renames; saves confirm and apply file operations.
 // SPDX-License-Identifier: Apache-2.0
 wit_bindgen::generate!({ path: "../../../wit", world: "editor-plugin" });
-use dust::plugin::host;
+use dusty::plugin::host;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 

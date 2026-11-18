@@ -1,7 +1,7 @@
-//! Buffer words offered through Dust's menu and inline completion pipeline.
+//! Buffer words offered through Dusty's menu and inline completion pipeline.
 // SPDX-License-Identifier: Apache-2.0
 wit_bindgen::generate!({ path: "../../../wit", world: "editor-plugin" });
-use dust::plugin::host;
+use dusty::plugin::host;
 use std::collections::BTreeSet;
 
 struct Words;

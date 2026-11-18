@@ -1,4 +1,4 @@
-use dust::git::{
+use dusty::git::{
     GitBranchList, GitBranchListRequest, GitBranchRequest, GitBranchResult, GitBranchWorker,
 };
 use std::path::Path;

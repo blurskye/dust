@@ -16,32 +16,32 @@
 #[path = "support/forge_fake.rs"]
 mod forge_fake;
 
-use dust::forge::cache;
-use dust::forge::cache::Cache;
-use dust::forge::cache::CacheKey;
-use dust::forge::capability::Cap;
-use dust::forge::cli::CliTransport;
-use dust::forge::credential::Credential;
-use dust::forge::credential::CredentialSource;
-use dust::forge::credential::Env;
-use dust::forge::credential::Secret;
-use dust::forge::detect;
-use dust::forge::http::HttpTransport;
-use dust::forge::model::logs;
-use dust::forge::model::*;
-use dust::forge::provider;
-use dust::forge::provider::Conditional;
-use dust::forge::provider::Fetched;
-use dust::forge::provider::ForgeContext;
-use dust::forge::provider::Provider;
-use dust::forge::provider::ProviderKind;
-use dust::forge::provider::RepoRef;
-use dust::forge::request::*;
-use dust::forge::transport::Cli;
-use dust::forge::transport::ConnectOptions;
-use dust::forge::transport::Endpoints;
-use dust::forge::transport::HostKey;
-use dust::forge::transport::Transport;
+use dusty::forge::cache;
+use dusty::forge::cache::Cache;
+use dusty::forge::cache::CacheKey;
+use dusty::forge::capability::Cap;
+use dusty::forge::cli::CliTransport;
+use dusty::forge::credential::Credential;
+use dusty::forge::credential::CredentialSource;
+use dusty::forge::credential::Env;
+use dusty::forge::credential::Secret;
+use dusty::forge::detect;
+use dusty::forge::http::HttpTransport;
+use dusty::forge::model::logs;
+use dusty::forge::model::*;
+use dusty::forge::provider;
+use dusty::forge::provider::Conditional;
+use dusty::forge::provider::Fetched;
+use dusty::forge::provider::ForgeContext;
+use dusty::forge::provider::Provider;
+use dusty::forge::provider::ProviderKind;
+use dusty::forge::provider::RepoRef;
+use dusty::forge::request::*;
+use dusty::forge::transport::Cli;
+use dusty::forge::transport::ConnectOptions;
+use dusty::forge::transport::Endpoints;
+use dusty::forge::transport::HostKey;
+use dusty::forge::transport::Transport;
 use forge_fake::FAKE_TOKEN;
 use forge_fake::ForgeServer;
 use serde_json::Value;
@@ -1191,7 +1191,7 @@ fn refresh(harness: &Harness, cache: &Cache, read: &Read) -> (Payload, Option<St
     let ctx = harness.ctx();
     let provider = harness.provider();
     let key = CacheKey::new(ctx.host(), ctx.repo.as_ref(), read);
-    let (cond, base) = dust::forge::incremental::prepare(
+    let (cond, base) = dusty::forge::incremental::prepare(
         provider.as_ref(),
         &ctx,
         cache,
@@ -1202,7 +1202,7 @@ fn refresh(harness: &Harness, cache: &Cache, read: &Read) -> (Payload, Option<St
     let since = cond.since.as_ref().map(|since| since.as_str().to_owned());
     let fetched = harness.fetch(&ctx, read, &cond);
     let fetched = match base {
-        Some(base) => dust::forge::incremental::merge(read, base, fetched),
+        Some(base) => dusty::forge::incremental::merge(read, base, fetched),
         None => fetched,
     };
     let Fetched::Payload { value, .. } = fetched else {
@@ -1297,7 +1297,7 @@ pub fn since_merges_without_full_reload(harness: &Harness) {
         }
     }
     // Every tenth refresh is full again.
-    for _ in 2..dust::forge::incremental::FULL_EVERY {
+    for _ in 2..dusty::forge::incremental::FULL_EVERY {
         refresh(harness, &cache, &read);
     }
     let (_, since) = refresh(harness, &cache, &read);
@@ -1391,7 +1391,7 @@ pub fn concurrent_reads_coalesce(harness: &Harness) {
                 let read = read.clone();
                 scope.spawn(move || {
                     let ctx = harness.ctx();
-                    dust::forge::inflight::read(
+                    dusty::forge::inflight::read(
                         harness.provider().as_ref(),
                         &ctx,
                         &read,
@@ -1404,7 +1404,7 @@ pub fn concurrent_reads_coalesce(harness: &Harness) {
             .collect::<Vec<_>>();
         let ctx = harness.ctx();
         let deadline = Instant::now() + Duration::from_secs(20);
-        while dust::forge::inflight::followers(&ctx, &read, &Conditional::default()) < 3 {
+        while dusty::forge::inflight::followers(&ctx, &read, &Conditional::default()) < 3 {
             assert!(Instant::now() < deadline, "the readers never overlapped");
             std::thread::sleep(Duration::from_millis(5));
         }
@@ -1432,13 +1432,13 @@ pub fn etag_revalidates(harness: &Harness) {
     harness.warm();
     let read = runs(RunFilter::default());
     let first = harness.read(read.clone());
-    let revalidated = dust::forge::etag::revalidated();
+    let revalidated = dusty::forge::etag::revalidated();
     harness.clear();
     let second = harness.read(read);
     assert_eq!(first, second);
     assert_eq!(harness.count(harness.runs_tail()), 1);
     assert_eq!(harness.state()["not_modified"], json!(1));
-    assert_eq!(dust::forge::etag::revalidated() - revalidated, 1);
+    assert_eq!(dusty::forge::etag::revalidated() - revalidated, 1);
     let sent = harness
         .requests()
         .into_iter()
@@ -1525,7 +1525,7 @@ pub fn typical_refresh(harness: &Harness) {
             let read = read.clone();
             scope.spawn(move || {
                 let ctx = fresh.ctx();
-                dust::forge::inflight::read(
+                dusty::forge::inflight::read(
                     fresh.provider().as_ref(),
                     &ctx,
                     &read,

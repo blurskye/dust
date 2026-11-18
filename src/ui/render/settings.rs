@@ -1025,7 +1025,7 @@ mod tests {
             modified: false,
             restart: false,
         };
-        let about = "acp runs the agent inside Dust's agent panel; terminal runs the agent's own \
+        let about = "acp runs the agent inside Dusty's agent panel; terminal runs the agent's own \
                      command-line program in a terminal on the side: /workspace/a  b`c.rs.";
         let page = SettingsPageState {
             rows: vec![row("Connection", about), row("Next", "Short.")],

@@ -1131,7 +1131,7 @@ pub enum TerminalError {
 
 #[cfg(test)]
 mod tests {
-    use crate::editor::input::KeyCode as DustKeyCode;
+    use crate::editor::input::KeyCode as DustyKeyCode;
     use crate::editor::input::Modifiers;
     use crate::ui::Style;
     use crossterm::event::Event;
@@ -1167,7 +1167,7 @@ mod tests {
         use std::time::Duration;
         use std::time::Instant;
 
-        if std::env::var_os("DUST_TEST_RESIZE_CHILD").is_some() {
+        if std::env::var_os("DUSTY_TEST_RESIZE_CHILD").is_some() {
             let terminal = crate::ui::terminal::TerminalSession::enter(
                 crate::ui::terminal::TerminalOptions {
                     color_mode: crate::config::ColorMode::Ansi16,
@@ -1204,7 +1204,7 @@ mod tests {
             "ui::terminal::tests::resize_events_are_serviced_without_tty_input",
             "--nocapture",
         ]);
-        command.env("DUST_TEST_RESIZE_CHILD", "1");
+        command.env("DUSTY_TEST_RESIZE_CHILD", "1");
         command.env("TERM", "xterm-256color");
         let mut child = pair.slave.spawn_command(command).unwrap();
         drop(pair.slave);
@@ -1773,7 +1773,7 @@ mod tests {
                 KeyModifiers::CONTROL,
             )));
             assert!(
-                matches!(event, Some(UiEvent::Key { key: crate::editor::input::KeyEvent { code: DustKeyCode::Char(c), .. }, .. }) if c == digit)
+                matches!(event, Some(UiEvent::Key { key: crate::editor::input::KeyEvent { code: DustyKeyCode::Char(c), .. }, .. }) if c == digit)
             );
         }
     }
@@ -1793,7 +1793,7 @@ mod tests {
             slash,
             Some(UiEvent::Key {
                 key: crate::editor::input::KeyEvent {
-                    code: DustKeyCode::Char('/'),
+                    code: DustyKeyCode::Char('/'),
                     modifiers: Modifiers {
                         control: true,
                         ..Modifiers::default()
@@ -1806,7 +1806,7 @@ mod tests {
             backslash,
             Some(UiEvent::Key {
                 key: crate::editor::input::KeyEvent {
-                    code: DustKeyCode::Char('\\'),
+                    code: DustyKeyCode::Char('\\'),
                     modifiers: Modifiers {
                         control: true,
                         ..Modifiers::default()
@@ -1841,7 +1841,7 @@ mod tests {
             control_upper,
             Some(UiEvent::Key {
                 key: crate::editor::input::KeyEvent {
-                    code: DustKeyCode::Char('R'),
+                    code: DustyKeyCode::Char('R'),
                     modifiers: Modifiers {
                         control: true,
                         shift: false,
@@ -1880,7 +1880,7 @@ mod tests {
         let Some(UiEvent::Key { key, .. }) = event else {
             panic!("expected key event");
         };
-        assert_eq!(key.code, DustKeyCode::Char('h'));
+        assert_eq!(key.code, DustyKeyCode::Char('h'));
         assert_eq!(key.text_character(), Some('h'));
         assert!(key.modifiers.shift);
     }
@@ -1895,7 +1895,7 @@ mod tests {
             symbol,
             Some(UiEvent::Key {
                 key: crate::editor::input::KeyEvent {
-                    code: DustKeyCode::Char('!'),
+                    code: DustyKeyCode::Char('!'),
                     modifiers: Modifiers { shift: false, .. },
                 },
                 ..
@@ -1909,7 +1909,7 @@ mod tests {
             intentional_shift_digit,
             Some(UiEvent::Key {
                 key: crate::editor::input::KeyEvent {
-                    code: DustKeyCode::Char('1'),
+                    code: DustyKeyCode::Char('1'),
                     modifiers: Modifiers { shift: true, .. },
                 },
                 ..
@@ -1927,7 +1927,7 @@ mod tests {
             event,
             Some(UiEvent::Key {
                 key: crate::editor::input::KeyEvent {
-                    code: DustKeyCode::Char('w'),
+                    code: DustyKeyCode::Char('w'),
                     modifiers: Modifiers {
                         control: true,
                         alt: false,

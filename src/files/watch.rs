@@ -330,7 +330,7 @@ impl ExplorerWatchWorker {
         let cancelled_through = Arc::new(AtomicU64::new(0));
         let worker_cancelled = Arc::clone(&cancelled_through);
         thread::Builder::new()
-            .name("dust-explorer-watch".into())
+            .name("dusty-explorer-watch".into())
             .spawn(move || explorer_watch_worker(worker_policy, commands, events, worker_cancelled))
             .map_err(|_| ExplorerWatchError::WorkerUnavailable)?;
         Ok(Self {
@@ -703,7 +703,7 @@ mod tests {
 
     #[test]
     fn global_ignore_changes_invalidate_fingerprints() {
-        const CHILD_ROOT: &str = "DUST_TEST_GLOBAL_IGNORE_ROOT";
+        const CHILD_ROOT: &str = "DUSTY_TEST_GLOBAL_IGNORE_ROOT";
         let Some(root) = std::env::var_os(CHILD_ROOT) else {
             let root = tempfile::tempdir().unwrap();
             let excludes = root.path().join("excludes");

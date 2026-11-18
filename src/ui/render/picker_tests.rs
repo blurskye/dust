@@ -19,7 +19,7 @@ fn theme_geometry_is_compact_and_bounded_without_resizing_other_pickers() {
         footer: None,
         input_hint: String::new(),
         surface: PickerSurfaceKind::Theme,
-        title: "Dust themes".into(),
+        title: "Dusty themes".into(),
         query: String::new(),
         rows: vec![],
         selected: None,
@@ -88,7 +88,7 @@ fn picker_sources_share_a_right_column_and_do_not_overwrite_labels_or_borders() 
                 title: "Choices".into(),
                 query: String::new(),
                 rows: vec![
-                    PickerRow::text("one", "Dust", "Current", "Builtin"),
+                    PickerRow::text("one", "Dusty", "Current", "Builtin"),
                     PickerRow::text("two", "Long 名称 ".repeat(12), String::new(), "Builtin"),
                     PickerRow::text("three", "Other", String::new(), "插件"),
                 ],
@@ -115,7 +115,7 @@ fn picker_sources_share_a_right_column_and_do_not_overwrite_labels_or_borders() 
                     assert_eq!(frame.grid.get(right - 7, row).unwrap().style, style);
                     assert_eq!(frame.grid.get(right - 8, row).unwrap().symbol, " ");
                 }
-                assert!(frame.grid.row_text(5).contains("Dust  Current"));
+                assert!(frame.grid.row_text(5).contains("Dusty  Current"));
                 assert_eq!(frame.grid.get(right - 4, 7).unwrap().symbol, "插");
                 assert_eq!(frame.grid.get(right - 2, 7).unwrap().symbol, "件");
             }

@@ -1248,7 +1248,7 @@ impl App {
                 self.install_picker(self.message("picker_buffers_title", &[]), items);
             }
             PickerKind::Roots => {
-                // Every workspace Dust has opened on this machine; choosing one moves the
+                // Every workspace Dusty has opened on this machine; choosing one moves the
                 // editor there like a worktree switch.
                 let current = self.state.workspace_root.clone();
                 let mut projects = self

@@ -23,12 +23,12 @@ const BUNDLED_NIX_LSP_LOCK: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/assets/tools/nix-workspace/flake.lock"
 ));
-/// Exact nixpkgs revision locked by Dust's bundled Linux compatibility runtime.
+/// Exact nixpkgs revision locked by Dusty's bundled Linux compatibility runtime.
 pub const NIX_LSP_NIXPKGS_REVISION: &str = "b6018f87da91d19d0ab4cf979885689b469cdd41";
 const NIX_COMPATIBILITY_FLAKE_PACKAGE: &str = "compat-runtime";
 const NIX_COMPATIBILITY_RUNTIME_ID: &str =
     "v1-b6018f87da91d19d0ab4cf979885689b469cdd41-common-libraries-1";
-const NIX_RUNTIME_ENVIRONMENT_FILE: &str = "share/dust/runtime.env";
+const NIX_RUNTIME_ENVIRONMENT_FILE: &str = "share/dusty/runtime.env";
 const MAXIMUM_NIX_RUNTIME_ENVIRONMENT_BYTES: u64 = 32 * 1024;
 const MAXIMUM_OS_RELEASE_BYTES: u64 = 16 * 1024;
 static NIXOS_HOST: OnceLock<bool> = OnceLock::new();

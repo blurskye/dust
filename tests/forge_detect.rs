@@ -8,20 +8,20 @@
 #[path = "support/forge_fake.rs"]
 mod forge_fake;
 
-use dust::forge::credential::CredentialSource;
-use dust::forge::credential::Env;
-use dust::forge::credential::Stores;
-use dust::forge::detect;
-use dust::forge::detect::DetectInputs;
-use dust::forge::detect::DetectSource;
-use dust::forge::detect::Detected;
-use dust::forge::detect::ForgeConfig;
-use dust::forge::detect::HostsFile;
-use dust::forge::provider::ProviderKind;
-use dust::forge::request::ForgeError;
-use dust::forge::transport::Cli;
-use dust::forge::transport::ConnectOptions;
-use dust::forge::transport::HostKey;
+use dusty::forge::credential::CredentialSource;
+use dusty::forge::credential::Env;
+use dusty::forge::credential::Stores;
+use dusty::forge::detect;
+use dusty::forge::detect::DetectInputs;
+use dusty::forge::detect::DetectSource;
+use dusty::forge::detect::Detected;
+use dusty::forge::detect::ForgeConfig;
+use dusty::forge::detect::HostsFile;
+use dusty::forge::provider::ProviderKind;
+use dusty::forge::request::ForgeError;
+use dusty::forge::transport::Cli;
+use dusty::forge::transport::ConnectOptions;
+use dusty::forge::transport::HostKey;
 use forge_fake::FAKE_TOKEN;
 use forge_fake::ForgeServer;
 use serde_json::Value;
@@ -489,10 +489,10 @@ fn remotes_pick_the_forge_host() {
 /// it is not the web port) and HTTPS with a port (kept), and travels as one encoded project id.
 #[test]
 fn nested_gitlab_groups_survive_every_remote_form() {
-    use dust::forge::provider;
-    use dust::forge::provider::Conditional;
-    use dust::forge::provider::ForgeContext;
-    use dust::forge::request::Read;
+    use dusty::forge::provider;
+    use dusty::forge::provider::Conditional;
+    use dusty::forge::provider::ForgeContext;
+    use dusty::forge::request::Read;
     for (remote, host) in [
         (
             "git@gitlab.example.com:group/sub/project.git",

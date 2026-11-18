@@ -172,7 +172,7 @@ mod tests {
 
     fn ambiguous_publication(head: git2::Oid) -> String {
         format!(
-            "Cannot publish commit: injected I/O error; inspect HEAD and refs/dust/rewrite-result/{}; original refs/dust/rewrite/{head}",
+            "Cannot publish commit: injected I/O error; inspect HEAD and refs/dusty/rewrite-result/{}; original refs/dusty/rewrite/{head}",
             "1".repeat(40)
         )
     }
@@ -255,7 +255,7 @@ mod tests {
         screen.accept_rewrite_result(Ok(crate::git::rewrite::Outcome {
             kind: Kind::Reword,
             head,
-            recovery: format!("refs/dust/rewrite/{head}"),
+            recovery: format!("refs/dusty/rewrite/{head}"),
         }));
         assert!(!screen.busy && !screen.reflog_submitting);
         assert!(screen.form.is_none() && screen.rewrite_diagnostic.is_none());

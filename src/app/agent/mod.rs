@@ -5,7 +5,7 @@
 //! placeholder buffer. Questions go to the active session. A session keeps the worktree it
 //! started in; switching worktrees does not move it.
 //!
-//! Each top-level session gets Dust's MCP server (`agent::mcp`), whose `agent` tool starts a
+//! Each top-level session gets Dusty's MCP server (`agent::mcp`), whose `agent` tool starts a
 //! subagent: a session in its own tab that works on one task and whose final answer goes
 //! back to the agent that asked. Agents' own subagent tools are turned off in the default
 //! profiles, so every agent gets the same subagents.
@@ -125,7 +125,7 @@ pub(super) struct AgentPanel {
     active: usize,
     /// Tab numbers are never reused, so a late permission answer cannot reach the wrong tab.
     started: u64,
-    /// Agents whose `add_tools` command ran in this run of Dust.
+    /// Agents whose `add_tools` command ran in this run of Dusty.
     tools_added: HashSet<String>,
     /// What went wrong running those commands, shown by the next event pass.
     tool_failures: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
@@ -446,7 +446,7 @@ impl AgentSession {
             return Ok(());
         };
         let Some(option) = self.option("model") else {
-            return Err(format!("{} does not let Dust choose its model", self.name));
+            return Err(format!("{} does not let Dusty choose its model", self.name));
         };
         let Some(value) = option
             .values
@@ -1329,7 +1329,7 @@ impl App {
         else {
             request
                 .reply
-                .send(Err("the agent that asked is no longer open in Dust".into()));
+                .send(Err("the agent that asked is no longer open in Dusty".into()));
             return;
         };
         if !matches!(parent.phase, Phase::Prompting(_))
@@ -1458,7 +1458,7 @@ impl App {
                     .collect::<Vec<_>>()
                     .join(" ");
                 Entry::Notice(format!(
-                    "To give {name} Dust's subagents, turn on Add Dust's Tools in Settings \
+                    "To give {name} Dusty's subagents, turn on Add Dusty's Tools in Settings \
                      (ctrl-,) or run this once: {command}"
                 ))
             });
@@ -1486,11 +1486,11 @@ impl App {
             format!("{millis}-{}-{number}", std::process::id())
         });
         let tools = match (&self.remote, std::env::current_exe()) {
-            (Some(server), Ok(dust)) => {
+            (Some(server), Ok(dusty)) => {
                 let profiles = self.configuration.settings().agents.profiles.keys();
                 let profiles = profiles.map(String::as_str).collect::<Vec<_>>().join(",");
                 json!([agent::mcp::server_entry(
-                    &dust,
+                    &dusty,
                     server.path(),
                     number,
                     &profiles
@@ -1558,10 +1558,10 @@ impl App {
     }
 
     /// Start the agent of profile `name`. `tab` is the session's tab number, for agents that
-    /// start Dust's MCP server from their own config; subagents get none.
-    /// Run the agent's `add_tools` command once per run of Dust when `agents.add_tools` is on, so
-    /// an agent that reads MCP servers only from its own config gets Dust's tools before it
-    /// starts. A failure is shown and not retried until Dust starts again.
+    /// start Dusty's MCP server from their own config; subagents get none.
+    /// Run the agent's `add_tools` command once per run of Dusty when `agents.add_tools` is on, so
+    /// an agent that reads MCP servers only from its own config gets Dusty's tools before it
+    /// starts. A failure is shown and not retried until Dusty starts again.
     pub(in crate::app) fn add_agent_tools(&mut self, name: &str) {
         let agents = &self.configuration.settings().agents;
         let Some(command) = agents.profiles.get(name).and_then(add_tools_command) else {
@@ -1588,7 +1588,7 @@ impl App {
                 Err(error) => error.to_string(),
             };
             if let Ok(mut failures) = failures.lock() {
-                failures.push(format!("could not add Dust's tools to {name}: {error}"));
+                failures.push(format!("could not add Dusty's tools to {name}: {error}"));
             }
         });
     }
@@ -1654,7 +1654,7 @@ impl App {
         }
     }
 
-    /// The program to run: a path as given, a Dust-installed adapter, or one on `PATH`.
+    /// The program to run: a path as given, a Dusty-installed adapter, or one on `PATH`.
     pub(in crate::app) fn agent_program(&self, program: &Path) -> Option<PathBuf> {
         if program.components().count() > 1 {
             return program.is_file().then(|| program.to_path_buf());
@@ -1917,7 +1917,7 @@ impl App {
                 _ => self.respond_to_agent(
                     index,
                     id,
-                    Err(format!("{method} is not supported by Dust")),
+                    Err(format!("{method} is not supported by Dusty")),
                 ),
             },
             AgentMessage::Log(line) => session.last_log = line,
@@ -2189,7 +2189,7 @@ impl App {
                 } else if !path.starts_with(&targets[1]) {
                     Err(format!("{} is outside {}", path.display(), targets[1].display()))
                 } else if open.iter().any(|id| self.state.buffers[*id].dirty) {
-                    Err(format!("{} has unsaved changes in Dust", path.display()))
+                    Err(format!("{} has unsaved changes in Dusty", path.display()))
                 } else {
                     let bytes = request.params["content"].as_str().expect("validated content").as_bytes().to_vec();
                     match self.documents.write_agent_file(path, targets[1].clone(), bytes) {
@@ -2234,7 +2234,7 @@ impl App {
             let buffer = &self.state.buffers[*id];
             if buffer.dirty {
                 return Err(
-                    "file written, but newer unsaved changes in Dust were preserved".into(),
+                    "file written, but newer unsaved changes in Dusty were preserved".into(),
                 );
             }
             candidate.reload_document(
@@ -3108,7 +3108,7 @@ fn age(seconds: u64) -> String {
     }
 }
 
-/// The profile's `add_tools` command with `{dust}` replaced by this Dust program, or `None`
+/// The profile's `add_tools` command with `{dusty}` replaced by this Dusty program, or `None`
 /// when it has none.
 fn add_tools_command(
     profile: &crate::config::AgentProfileConfig,
@@ -3116,13 +3116,13 @@ fn add_tools_command(
     if profile.add_tools.is_empty() {
         return None;
     }
-    let dust = std::env::current_exe().map_or_else(|_| "dust".into(), PathBuf::into_os_string);
+    let dusty = std::env::current_exe().map_or_else(|_| "dusty".into(), PathBuf::into_os_string);
     Some(
         profile
             .add_tools
             .iter()
             .map(|word| match word.as_str() {
-                "{dust}" => dust.clone(),
+                "{dusty}" => dusty.clone(),
                 word => word.into(),
             })
             .collect(),

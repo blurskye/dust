@@ -1,7 +1,7 @@
 //! Marked-file batches through native input/frame APIs and real disposable Git indexes.
-use dust::editor::input::{KeyCode, KeyEvent, Modifiers};
-use dust::git::screen::{GitScreen, ScreenOutcome};
-use dust::ui::{Frame, GitRole, KeyInputKind, Style, UiEvent};
+use dusty::editor::input::{KeyCode, KeyEvent, Modifiers};
+use dusty::git::screen::{GitScreen, ScreenOutcome};
+use dusty::ui::{Frame, GitRole, KeyInputKind, Style, UiEvent};
 use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, Instant};

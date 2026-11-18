@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Compare Dust with another editor (nvim + LazyVim by default) on the same machine.
+"""Compare Dusty with another editor (nvim + LazyVim by default) on the same machine.
 
 Usage:
-    scripts/bench [--dust PATH] [--other "nvim -n"] [--runs 5] [--keys 200]
+    scripts/bench [--dusty PATH] [--other "nvim -n"] [--runs 5] [--keys 200]
 
 Each editor runs in a pseudo-terminal of 120x40. Measured:
 
@@ -11,7 +11,7 @@ Each editor runs in a pseudo-terminal of 120x40. Measured:
     idle cpu  CPU time the editor uses over 3 s of doing nothing, once startup work is done
     memory    resident memory of the editor process after startup
 
-Dust runs with fresh XDG directories; the other editor uses its normal configuration,
+Dusty runs with fresh XDG directories; the other editor uses its normal configuration,
 which is the baseline being compared against. CPU and memory count the editor process and
 its same-named children (nvim's `--embed` server), not language servers or other tools.
 """
@@ -176,7 +176,7 @@ def measure(name, command, environment, cwd, path, runs, keys):
             time.sleep(3)
             idle.append((editor.cpu_seconds() - before) / 3 * 100)
             if run == 0:
-                # Escape dismisses Dust's workspace trust prompt (and is a no-op in nvim), then
+                # Escape dismisses Dusty's workspace trust prompt (and is a no-op in nvim), then
                 # `o` opens a line below the marker. `z` and `q` end no escape sequence.
                 os.write(editor.fd, b"\x1b")
                 editor.settle()
@@ -206,14 +206,14 @@ def measure(name, command, environment, cwd, path, runs, keys):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--dust", default=str(ROOT / "target/release/dust"))
+    parser.add_argument("--dusty", default=str(ROOT / "target/release/dusty"))
     # -n: no swap file, so a killed run does not leave a recovery prompt for the next one.
     parser.add_argument("--other", default="nvim -n")
     parser.add_argument("--runs", type=int, default=5)
     parser.add_argument("--keys", type=int, default=200)
     arguments = parser.parse_args()
 
-    with tempfile.TemporaryDirectory(prefix="dust-bench-") as scratch:
+    with tempfile.TemporaryDirectory(prefix="dusty-bench-") as scratch:
         scratch = pathlib.Path(scratch)
         workspace = scratch / "workspace"
         workspace.mkdir()
@@ -224,8 +224,8 @@ def main():
             directory = scratch / variable.lower()
             directory.mkdir()
             fresh[f"XDG_{variable}_HOME"] = str(directory)
-        dust = str(pathlib.Path(arguments.dust).resolve())
-        measure("dust", [dust], fresh, workspace, path, arguments.runs, arguments.keys)
+        dusty = str(pathlib.Path(arguments.dusty).resolve())
+        measure("dusty", [dusty], fresh, workspace, path, arguments.runs, arguments.keys)
         other = shlex.split(arguments.other)
         if shutil.which(other[0]):
             measure(arguments.other, other, base, workspace, path, arguments.runs, arguments.keys)

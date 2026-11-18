@@ -67,7 +67,7 @@ impl ToolVersionWorker {
         let cancel = Arc::new(AtomicBool::new(false));
         let worker_cancel = Arc::clone(&cancel);
         let thread = thread::Builder::new()
-            .name("dust-tool-version-probe".into())
+            .name("dusty-tool-version-probe".into())
             .spawn(move || {
                 while !worker_cancel.load(Ordering::Acquire) {
                     let Ok(command) = requests.recv() else {

@@ -316,7 +316,7 @@ pub fn initialize_params() -> Value {
             "fs": {"readTextFile": true, "writeTextFile": true},
             "terminal": false
         },
-        "clientInfo": {"name": "dust", "version": env!("CARGO_PKG_VERSION")}
+        "clientInfo": {"name": "dusty", "version": env!("CARGO_PKG_VERSION")}
     })
 }
 
@@ -594,7 +594,7 @@ impl ToolCall {
                     Some("content") => {
                         output_lines(item["content"]["text"].as_str().unwrap_or_default())
                     }
-                    // Dust offers agents no terminals, so terminal items have nothing to show.
+                    // Dusty offers agents no terminals, so terminal items have nothing to show.
                     _ => Vec::new(),
                 })
                 .collect();
@@ -1246,7 +1246,7 @@ mod tests {
 
     #[test]
     fn agent_session_parameters_preserve_paths_tools_and_metadata() {
-        let tools = json!([{"name": "dust"}]);
+        let tools = json!([{"name": "dusty"}]);
         let meta = json!({"mode": "plan"});
         assert_eq!(
             new_session_params(Path::new("/work/café"), &tools, Some(&meta)).unwrap(),
@@ -1341,12 +1341,12 @@ mod tests {
         }});
         assert_eq!(permission_changes(&located), [PathBuf::from("/w/a.rs")]);
         let agent = json!({"toolCall": {
-            "title": "mcp__dust__agent",
+            "title": "mcp__dusty__agent",
             "rawInput": {"agent": "reviewer", "count": 2, "task": "reply\n  ok"},
         }});
         assert_eq!(
             permission_detail(&agent),
-            "mcp__dust__agent\nagent: reviewer\ncount: 2\ntask: reply ok"
+            "mcp__dusty__agent\nagent: reviewer\ncount: 2\ntask: reply ok"
         );
     }
 

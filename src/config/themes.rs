@@ -10,7 +10,7 @@ use std::sync::atomic::Ordering;
 use std::sync::mpsc::SyncSender;
 
 pub(super) const BUNDLED: &[(&str, &str)] = &[
-    ("dust", crate::config::load::BUNDLED_THEME),
+    ("dusty", crate::config::load::BUNDLED_THEME),
     (
         "catppuccin-latte",
         include_str!(concat!(
@@ -112,7 +112,7 @@ pub(super) fn bundled_named(name: &str) -> Option<ThemeChoice> {
 }
 pub(crate) fn theme_display_name(name: &str) -> String {
     match name {
-        "dust" => "Dust",
+        "dusty" => "Dusty",
         "catppuccin-latte" => "Catppuccin Latte",
         "catppuccin-frappe" => "Catppuccin Frappé",
         "catppuccin-macchiato" => "Catppuccin Macchiato",
@@ -351,7 +351,7 @@ mod tests {
         let mut installed = crate::config::load::bundled_theme();
         installed.styles.accent.foreground = crate::config::ThemeColor::Red;
         fs::write(
-            root.path().join("dust.toml"),
+            root.path().join("dusty.toml"),
             toml::to_string(&installed).unwrap(),
         )
         .unwrap();
@@ -375,13 +375,13 @@ mod tests {
         });
         let catalog = receiver.try_recv().unwrap();
         assert_eq!(catalog.choices.len(), BUNDLED.len());
-        let dust = catalog
+        let dusty = catalog
             .choices
             .iter()
-            .find(|choice| choice.theme.name == "dust")
+            .find(|choice| choice.theme.name == "dusty")
             .unwrap();
-        assert_eq!(dust.theme, installed);
-        assert_eq!(dust.path, root.path().join("dust.toml"));
+        assert_eq!(dusty.theme, installed);
+        assert_eq!(dusty.path, root.path().join("dusty.toml"));
         assert_eq!(catalog.diagnostics.len(), 2);
     }
 
@@ -389,7 +389,7 @@ mod tests {
     fn discovery_validates_bounds_names_styles_and_cancellation() {
         let root = tempfile::tempdir().unwrap();
         let valid =
-            crate::config::load::BUNDLED_THEME.replace("name = \"dust\"", "name = \"valid\"");
+            crate::config::load::BUNDLED_THEME.replace("name = \"dusty\"", "name = \"valid\"");
         fs::write(root.path().join("valid.toml"), &valid).unwrap();
         fs::write(root.path().join("mismatch.toml"), &valid).unwrap();
         fs::write(root.path().join("broken.toml"), "not toml").unwrap();

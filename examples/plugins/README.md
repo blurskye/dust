@@ -1,6 +1,6 @@
 # Rust component examples
 
-These six small guests use production `wit/dust-plugin.wit` directly. The only
+These six small guests use production `wit/dusty-plugin.wit` directly. The only
 SDK dependency is the same pinned `wit-bindgen` used by the retained test guest.
 Sources are Apache-2.0. `guest.core.wasm` files are checked in so editor tests run
 real guests without invoking a compiler. They are **core modules with component
@@ -17,7 +17,7 @@ metadata**, not directly installable components.
 | [wrappers](wrappers/README.md) | Ordered before/after command wrappers (demonstration) | `:plugin.wrappersa.enable`, then `:plugin.wrappersb.enable` |
 | [mode](mode/README.md) | A temporary review mode, key layer and status segment (demonstration) | `:plugin.mode.enter` |
 
-`dust plugin new mywords` copies the completion guest's shape into a standalone
+`dusty plugin new mywords` copies the completion guest's shape into a standalone
 crate with WIT, lockfile, manifest and its own build/load README. No SDK dependency
 besides `wit-bindgen` is needed. `:plugins` opens the browser; Enter on a plugin
 shows session enable/disable, reload, folder and permission actions.
@@ -31,7 +31,7 @@ nix develop .#guest
 for name in autopairs surround oil completion wrappers mode; do
   (cd examples/plugins/$name &&
     cargo build --locked --release --target wasm32-unknown-unknown &&
-    cp target/wasm32-unknown-unknown/release/dust_example_$name.wasm guest.core.wasm)
+    cp target/wasm32-unknown-unknown/release/dusty_example_$name.wasm guest.core.wasm)
 done
 ```
 
@@ -39,10 +39,10 @@ For a build check that leaves the checked-in fixtures unchanged, build the host
 editor first, then run (replace the binary path if using `CARGO_TARGET_DIR`):
 
 ```sh
-nix develop .#guest --command scripts/check-plugin-guests "$PWD/target/release/dust"
+nix develop .#guest --command scripts/check-plugin-guests "$PWD/target/release/dusty"
 ```
 
-This builds all six examples and a fresh `dust plugin new words` scaffold, with
+This builds all six examples and a fresh `dusty plugin new words` scaffold, with
 locked dependencies. Guest build outputs go under the Cargo target directory.
 
 Then package them with the repository's existing component encoder:
@@ -66,7 +66,7 @@ sources are templates, not valid installed manifests.
 
 ## Install
 
-In your Dust `config.toml`, select the absolute directory containing the packaged
+In your Dusty `config.toml`, select the absolute directory containing the packaged
 plugin folders, and enable only the examples you want:
 
 ```toml
@@ -80,7 +80,7 @@ enabled = true
 ```
 
 Replace `autopairs` in all three places for another example. Wrappers uses **two**
-entries, `wrappersa` and `wrappersb`, backed by the same guest source. Restart Dust,
+entries, `wrappersa` and `wrappersb`, backed by the same guest source. Restart Dusty,
 open a buffer, and run the command in each example's README. Contributions are
 removed when the plugin is disabled. No example changes the default keymap.
 
@@ -97,9 +97,9 @@ configuration and writes demonstration files, so use a **fresh disposable direct
 
 ```sh
 mkdir -p target/plugin-demo
-DUST_EXAMPLE=completion \
-DUST_BINARY="$PWD/target/debug/dust" \
-DUST_EXAMPLE_PACK="/absolute/path/to/packaged-plugins" \
+DUSTY_EXAMPLE=completion \
+DUSTY_BINARY="$PWD/target/debug/dusty" \
+DUSTY_EXAMPLE_PACK="/absolute/path/to/packaged-plugins" \
 scripts/ui-shot scripts/ui-scenarios/plugin-completion.keys \
   --binary scripts/ui-scenarios/plugin-launch --cwd target/plugin-demo
 ```

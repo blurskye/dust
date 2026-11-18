@@ -1,6 +1,6 @@
-use dust::editor::input::{KeyCode, KeyEvent, Modifiers};
-use dust::git::screen::{GitScreen, ScreenOutcome};
-use dust::ui::{KeyInputKind, UiEvent};
+use dusty::editor::input::{KeyCode, KeyEvent, Modifiers};
+use dusty::git::screen::{GitScreen, ScreenOutcome};
+use dusty::ui::{KeyInputKind, UiEvent};
 use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -153,10 +153,10 @@ fn project_header_is_compact_and_branch_badges_are_separate() {
                 .get(text[..badge].width() as u16, branch)
                 .unwrap()
                 .style,
-            dust::ui::Style::Git {
-                role: dust::ui::GitRole::Modified,
-                surface: dust::ui::GitSurface::Chip(dust::ui::GitChip::Modified),
-                emphasis: dust::ui::Emphasis::None,
+            dusty::ui::Style::Git {
+                role: dusty::ui::GitRole::Modified,
+                surface: dusty::ui::GitSurface::Chip(dusty::ui::GitChip::Modified),
+                emphasis: dusty::ui::Emphasis::None,
             }
         );
     }
@@ -285,7 +285,7 @@ fn changes_and_commit_files_share_a_single_collapsible_sidebar_tree() {
 }
 
 /// The x of the rail's right border: the first `╮` on the top pane row.
-fn rail_right(frame: &dust::ui::Frame) -> u16 {
+fn rail_right(frame: &dusty::ui::Frame) -> u16 {
     (0..frame.grid.width())
         .find(|&x| frame.grid.get(x, 1).unwrap().symbol == "╮")
         .unwrap()
@@ -376,7 +376,7 @@ fn commit_selection_updates_changes_without_hiding_other_panes_or_staging() {
 
 #[test]
 fn file_kind_modes_preserve_status_cells_identity_and_native_cursor() {
-    use dust::config::ExplorerIconMode;
+    use dusty::config::ExplorerIconMode;
     let dir = repo();
     std::fs::write(
         dir.path().join("queue.py"),
@@ -539,9 +539,9 @@ fn wide_diff_aligns_old_and_new_code_with_tinted_syntax() {
             && (0..180).any(|x| {
                 matches!(
                     frame.grid.get(x, y).unwrap().style,
-                    dust::ui::Style::GitSyntax {
-                        surface: dust::ui::GitSurface::AddedBand
-                            | dust::ui::GitSurface::AddedEmphasis,
+                    dusty::ui::Style::GitSyntax {
+                        surface: dusty::ui::GitSurface::AddedBand
+                            | dusty::ui::GitSurface::AddedEmphasis,
                         ..
                     }
                 )
@@ -649,14 +649,14 @@ fn commit_scrolls_immediately_pins_identity_and_exposes_the_full_message() {
         let files = screen.frame(width, height);
         let (_, file_y, _) = files.cursor.unwrap();
         assert!(files.grid.row_text(file_y).contains("scroll.rs"));
-        let added = |surface| dust::ui::Style::Git {
-            role: dust::ui::GitRole::Added,
+        let added = |surface| dusty::ui::Style::Git {
+            role: dusty::ui::GitRole::Added,
             surface,
-            emphasis: dust::ui::Emphasis::None,
+            emphasis: dusty::ui::Emphasis::None,
         };
         let stats_x = (0..width)
             .find(|&x| {
-                files.grid.get(x, file_y).unwrap().style == added(dust::ui::GitSurface::Cursor)
+                files.grid.get(x, file_y).unwrap().style == added(dusty::ui::GitSurface::Cursor)
             })
             .expect("selected file must show added-line statistics");
         key(&mut screen, KeyCode::Tab);
@@ -667,7 +667,7 @@ fn commit_scrolls_immediately_pins_identity_and_exposes_the_full_message() {
                 .get(stats_x, file_y)
                 .unwrap()
                 .style,
-            added(dust::ui::GitSurface::CursorInactive)
+            added(dusty::ui::GitSurface::CursorInactive)
         );
         let first = text_at(&mut screen);
         let footer = first.lines().nth(usize::from(height - 1)).unwrap();
@@ -766,7 +766,7 @@ fn commit_scrolls_immediately_pins_identity_and_exposes_the_full_message() {
 
 #[test]
 fn multiline_prompt_moves_by_display_column_without_splitting_graphemes() {
-    let mut prompt = dust::ui::PromptState::new(dust::ui::PromptKind::Text);
+    let mut prompt = dusty::ui::PromptState::new(dusty::ui::PromptKind::Text);
     prompt.input = "界áx\n12\n👩‍💻bc".into();
     prompt.cursor = "界áx\n12\n👩‍💻".len();
     prompt.move_vertical(true);
@@ -784,11 +784,11 @@ fn multiline_prompt_moves_by_display_column_without_splitting_graphemes() {
 
 #[test]
 fn floating_is_default_and_fullscreen_is_a_persisted_setting() {
-    use dust::config::{GitPlacement, GitWindowConfig};
-    use dust::ui::{CellGrid, Frame, Style};
+    use dusty::config::{GitPlacement, GitWindowConfig};
+    use dusty::ui::{CellGrid, Frame, Style};
     let dir = repo();
     let mut screen = GitScreen::open(dir.path()).unwrap();
-    let config = dust::config::load_bundled_config().config.ui.git;
+    let config = dusty::config::load_bundled_config().config.ui.git;
     assert_eq!(config.placement, GitPlacement::Float);
     let (rect, foreground) = screen.window_frame(160, 60, &config);
     assert_eq!((rect.x, rect.y, rect.width, rect.height), (12, 4, 136, 51));
@@ -816,7 +816,7 @@ fn floating_is_default_and_fullscreen_is_a_persisted_setting() {
             matches!(
                 background.grid.get(1, y).unwrap().style,
                 Style::Git {
-                    role: dust::ui::GitRole::Border,
+                    role: dusty::ui::GitRole::Border,
                     ..
                 }
             ),
@@ -850,7 +850,7 @@ fn floating_is_default_and_fullscreen_is_a_persisted_setting() {
     assert_eq!((small.width, small.height), (64, 20));
 }
 
-fn code_style(screen: &mut GitScreen, line: &str, token: &str) -> dust::ui::Style {
+fn code_style(screen: &mut GitScreen, line: &str, token: &str) -> dusty::ui::Style {
     use unicode_width::UnicodeWidthStr;
     let frame = screen.frame(160, 60);
     for y in 2..55 {
@@ -858,7 +858,7 @@ fn code_style(screen: &mut GitScreen, line: &str, token: &str) -> dust::ui::Styl
         if let Some(start) = row.find(line) {
             let at = start + line.find(token).unwrap();
             return match frame.grid.get(row[..at].width() as u16, y).unwrap().style {
-                dust::ui::Style::GitSyntax { group, .. } => dust::ui::Style::Syntax(group),
+                dusty::ui::Style::GitSyntax { group, .. } => dusty::ui::Style::Syntax(group),
                 style => style,
             };
         }
@@ -879,9 +879,9 @@ fn untracked_source_has_syntax_line_numbers_and_horizontal_scrolling() {
     let keyword = code_style(&mut screen, "fn main()", "fn");
     let string = code_style(&mut screen, "\"hello λ\"", "hello");
     let comment = code_style(&mut screen, "// a comment", "comment");
-    assert!(matches!(keyword, dust::ui::Style::Syntax(_)));
-    assert!(matches!(string, dust::ui::Style::Syntax(_)));
-    assert!(matches!(comment, dust::ui::Style::Syntax(_)));
+    assert!(matches!(keyword, dusty::ui::Style::Syntax(_)));
+    assert!(matches!(string, dusty::ui::Style::Syntax(_)));
+    assert!(matches!(comment, dusty::ui::Style::Syntax(_)));
     assert_ne!(keyword, string);
     assert_ne!(keyword, comment);
     assert!(view(&mut screen).contains("2 │ fn main()"));
@@ -908,7 +908,7 @@ fn untracked_source_has_syntax_line_numbers_and_horizontal_scrolling() {
     assert!(view(&mut screen).contains("TAIL_VISIBLE"));
     assert!(matches!(
         code_style(&mut screen, "TAIL_VISIBLE", "TAIL_VISIBLE"),
-        dust::ui::Style::Syntax(_)
+        dusty::ui::Style::Syntax(_)
     ));
     for _ in 0..10 {
         key(&mut screen, KeyCode::Left);
@@ -952,17 +952,17 @@ fn working_index_commit_and_stash_diffs_have_source_syntax_and_numbered_markers(
         wait(&mut screen, |s| view(s).contains("+ def after()"));
         assert!(matches!(
             code_style(&mut screen, "+ def after()", "def"),
-            dust::ui::Style::Syntax(_)
+            dusty::ui::Style::Syntax(_)
         ));
         key(&mut screen, KeyCode::Down);
         wait(&mut screen, |s| view(s).contains("+ fn after()"));
         assert!(matches!(
             code_style(&mut screen, "− fn before()", "fn"),
-            dust::ui::Style::Syntax(_)
+            dusty::ui::Style::Syntax(_)
         ));
         assert!(matches!(
             code_style(&mut screen, "+ fn after()", "after"),
-            dust::ui::Style::Syntax(_)
+            dusty::ui::Style::Syntax(_)
         ));
         assert!(view(&mut screen).contains("1 │ + fn after()"));
     }
@@ -972,14 +972,14 @@ fn working_index_commit_and_stash_diffs_have_source_syntax_and_numbered_markers(
     wait(&mut screen, |s| view(s).contains("+ def after()"));
     assert!(matches!(
         code_style(&mut screen, "+ def after()", "def"),
-        dust::ui::Style::Syntax(_)
+        dusty::ui::Style::Syntax(_)
     ));
     key(&mut screen, KeyCode::Enter);
     key(&mut screen, KeyCode::Down);
     wait(&mut screen, |s| view(s).contains("+ fn after()"));
     assert!(matches!(
         code_style(&mut screen, "+ fn after()", "fn"),
-        dust::ui::Style::Syntax(_)
+        dusty::ui::Style::Syntax(_)
     ));
     key(&mut screen, KeyCode::Escape);
     std::fs::write(dir.path().join("sample.rs"), "fn stashed() {}\n").unwrap();
@@ -989,7 +989,7 @@ fn working_index_commit_and_stash_diffs_have_source_syntax_and_numbered_markers(
     wait(&mut screen, |s| view(s).contains("+ fn stashed()"));
     assert!(matches!(
         code_style(&mut screen, "+ fn stashed()", "fn"),
-        dust::ui::Style::Syntax(_)
+        dusty::ui::Style::Syntax(_)
     ));
 }
 
@@ -1065,7 +1065,7 @@ fn commit_box_insert_hints_are_clear_without_duplicate_text() {
     key(&mut screen, KeyCode::Char('c'));
     assert_eq!(
         screen.input_mode(),
-        Some(dust::git::screen::InputMode::Insert)
+        Some(dusty::git::screen::InputMode::Insert)
     );
     let frame = screen.frame(120, 40);
     let shown = (0..40)
@@ -1147,10 +1147,10 @@ fn stages_unstages_and_commits_through_real_screen_input() {
     // A fully staged name is painted in the Staged (added) role on the cursor row.
     assert_eq!(
         staged.grid.get(filename as u16, row).unwrap().style,
-        dust::ui::Style::Git {
-            role: dust::ui::GitRole::Added,
-            surface: dust::ui::GitSurface::Cursor,
-            emphasis: dust::ui::Emphasis::None,
+        dusty::ui::Style::Git {
+            role: dusty::ui::GitRole::Added,
+            surface: dusty::ui::GitSurface::Cursor,
+            emphasis: dusty::ui::Emphasis::None,
         }
     );
     // No index-layer switch: `u` itself must unstage the selected file.
@@ -1170,10 +1170,10 @@ fn stages_unstages_and_commits_through_real_screen_input() {
     );
     assert_eq!(
         unstaged.grid.get(unstaged_name as u16, row).unwrap().style,
-        dust::ui::Style::Git {
-            role: dust::ui::GitRole::Text,
-            surface: dust::ui::GitSurface::Cursor,
-            emphasis: dust::ui::Emphasis::None,
+        dusty::ui::Style::Git {
+            role: dusty::ui::GitRole::Text,
+            surface: dusty::ui::GitSurface::Cursor,
+            emphasis: dusty::ui::Emphasis::None,
         }
     );
     key(&mut screen, KeyCode::Char('s'));
@@ -1245,10 +1245,10 @@ fn sidebar_rectangles_and_focus_surfaces_survive_folding_refresh_and_navigation(
                 .unwrap_or_else(|| panic!("{width}x{height} missing {name}"))
         })
     };
-    let edge = |role| dust::ui::Style::Git {
+    let edge = |role| dusty::ui::Style::Git {
         role,
-        surface: dust::ui::GitSurface::Pane,
-        emphasis: dust::ui::Emphasis::None,
+        surface: dusty::ui::GitSurface::Pane,
+        emphasis: dusty::ui::Emphasis::None,
     };
     // Narrow layouts show one pane at a time; pane rectangles are compared where the
     // rail is visible.
@@ -1259,7 +1259,7 @@ fn sidebar_rectangles_and_focus_surfaces_survive_folding_refresh_and_navigation(
         for (x, y) in [(0, 2), (right, 2), (right, 3)] {
             assert_eq!(
                 screen.frame(width, height).grid.get(x, y).unwrap().style,
-                edge(dust::ui::GitRole::Focus)
+                edge(dusty::ui::GitRole::Focus)
             );
         }
         key(&mut screen, KeyCode::Char('t'));
@@ -1274,7 +1274,7 @@ fn sidebar_rectangles_and_focus_surfaces_survive_folding_refresh_and_navigation(
         for (x, y) in [(0, 2), (right, 2), (right, 3)] {
             assert_eq!(
                 screen.frame(width, height).grid.get(x, y).unwrap().style,
-                edge(dust::ui::GitRole::Border)
+                edge(dusty::ui::GitRole::Border)
             );
         }
         for _ in 0..5 {
@@ -1460,7 +1460,7 @@ fn all_files_browses_clean_tracked_source_with_syntax() {
     wait(&mut screen, |s| view(s).contains("pub fn answer"));
     assert!(matches!(
         code_style(&mut screen, "pub fn answer", "fn"),
-        dust::ui::Style::Syntax(_)
+        dusty::ui::Style::Syntax(_)
     ));
     key(&mut screen, KeyCode::Char('F'));
     wait(&mut screen, |s| view(s).contains("Working tree clean"));
@@ -1496,7 +1496,7 @@ fn short_current_ref_header_has_no_old_title_suffix_and_resize_keeps_native_curs
     wait(&mut screen, |screen| view(screen).contains("Initial comm"));
     key(&mut screen, KeyCode::Char('3'));
     // The reader's border title names the selected branch and nothing else.
-    let reader_title = |frame: &dust::ui::Frame| {
+    let reader_title = |frame: &dusty::ui::Frame| {
         let rail = rail_right(frame);
         (rail + 1..frame.grid.width())
             .map(|x| frame.grid.get(x, 1).unwrap().symbol.clone())
@@ -1549,7 +1549,7 @@ fn short_current_ref_header_has_no_old_title_suffix_and_resize_keeps_native_curs
 
 /// The cell column where `token` starts on row `y`, read cell by cell (glyphs in the rail
 /// can be wide, so a `row_text` char index is not a column).
-fn token_column(frame: &dust::ui::Frame, y: u16, token: &str) -> Option<u16> {
+fn token_column(frame: &dusty::ui::Frame, y: u16, token: &str) -> Option<u16> {
     let width = frame.grid.width();
     let chars = token.chars().map(String::from).collect::<Vec<_>>();
     (0..width.saturating_sub(chars.len() as u16)).find(|&x| {

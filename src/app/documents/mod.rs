@@ -2011,7 +2011,7 @@ impl App {
         Some((metadata, head))
     }
 
-    /// A commit or stage made outside Dust, such as in its terminal, moves the index or HEAD.
+    /// A commit or stage made outside Dusty, such as in its terminal, moves the index or HEAD.
     fn follow_outside_git_changes(&mut self) {
         if self.git.status().is_none() {
             return;
@@ -2028,8 +2028,8 @@ impl App {
         }
     }
 
-    /// A status read that Dust starts sees the index and HEAD as they are now, so they are no
-    /// news to the next disk check. Otherwise Dust's own stage, unstage or commit looked like
+    /// A status read that Dusty starts sees the index and HEAD as they are now, so they are no
+    /// news to the next disk check. Otherwise Dusty's own stage, unstage or commit looked like
     /// an outside change up to a second later, and that refresh dropped the hunks just read
     /// for the next action: a reset confirmed then said "Git hunk target changed".
     pub(in crate::app) fn note_git_stamp(&mut self) {
@@ -2040,7 +2040,7 @@ impl App {
 }
 
 impl App {
-    /// Once a second, notice open files that changed outside Dust: lazygit, a hunk reset, a
+    /// Once a second, notice open files that changed outside Dusty: lazygit, a hunk reset, a
     /// formatter. A clean buffer takes the new text; a changed one keeps its text and says so.
     pub(in crate::app) fn process_disk_changes(&mut self) {
         let now = self.clock.monotonic();

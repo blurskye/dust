@@ -7,7 +7,7 @@ import sys
 import time
 
 args = sys.argv[1:]
-state_path = pathlib.Path(os.environ["DUST_GITHUB_FIXTURE"])
+state_path = pathlib.Path(os.environ["DUSTY_GITHUB_FIXTURE"])
 state = json.loads(state_path.read_text()) if state_path.exists() else {"calls": [], "comments": []}
 state["calls"].append(args)
 

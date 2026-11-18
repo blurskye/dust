@@ -1,4 +1,4 @@
-//! Dust library modules.
+//! Dusty library modules.
 
 #![forbid(unsafe_code)]
 // Some test helpers serve only Unix-only tests, so Windows test builds leave them unused.
@@ -30,7 +30,7 @@ pub mod persistence;
 pub mod plugins;
 /// Bounded process supervision and protocol framing shared by built-in features.
 pub mod process;
-/// Opening files in a running Dust from programs it starts.
+/// Opening files in a running Dusty from programs it starts.
 pub mod remote;
 /// Structured bounded redacted logs and health snapshots.
 pub mod telemetry;

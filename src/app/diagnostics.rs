@@ -531,7 +531,7 @@ impl Diagnostics {
 pub(in crate::app) fn document_uri(id: BufferId, path: Option<&std::path::Path>) -> String {
     use slotmap::Key;
     path.map(crate::language::lsp::file_uri)
-        .unwrap_or_else(|| format!("dust-buffer://{}", id.data().as_ffi()))
+        .unwrap_or_else(|| format!("dusty-buffer://{}", id.data().as_ffi()))
 }
 
 use crate::app::App;

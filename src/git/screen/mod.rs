@@ -455,7 +455,7 @@ pub struct GitScreen {
     refreshing_after_write: bool,
     /// The embedded host updates this before every input event.
     pub write_refusal: Option<String>,
-    /// Vim-style modes (`modal.rs`): on when the editor is modal, as Dust's editor is.
+    /// Vim-style modes (`modal.rs`): on when the editor is modal, as Dusty's editor is.
     modal: bool,
     /// The focused text box on the editor's Vim engine, while a form is open (`textbox.rs`).
     text_box: Option<textbox::TextBox>,

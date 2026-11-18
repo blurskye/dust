@@ -1,4 +1,4 @@
-//! Dust's own record of each agent conversation, so any tab can be resumed whether or not
+//! Dusty's own record of each agent conversation, so any tab can be resumed whether or not
 //! the agent can load its old sessions. One file per conversation: the first line describes
 //! it, so listing reads only that, and the second line holds the transcript.
 

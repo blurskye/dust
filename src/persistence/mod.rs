@@ -657,7 +657,7 @@ impl PersistenceWorker {
         let (tx, rx) = mpsc::sync_channel::<Request>(capacity.clamp(1, 64));
         let (etx, erx) = mpsc::sync_channel(capacity.clamp(1, 64));
         thread::Builder::new()
-            .name("dust-persistence".into())
+            .name("dusty-persistence".into())
             .spawn(move || {
                 if let Some(gate) = gate {
                     let _ = gate.recv();
@@ -1108,7 +1108,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn failed_writes_remove_temporary_files_and_preserve_saved_state() {
-        const CHILD: &str = "DUST_TEST_PERSISTENCE_FILE_LIMIT";
+        const CHILD: &str = "DUSTY_TEST_PERSISTENCE_FILE_LIMIT";
         if std::env::var_os(CHILD).is_none() {
             let result = std::process::Command::new("sh")
                 .args(["-c", "ulimit -f 1; trap '' XFSZ; exec \"$@\"", "sh"])

@@ -10,9 +10,9 @@
 //! - `a_big_repository_stays_fast`: the same steps on 5k commits and 2k changes, against bounds
 //!   generous enough for a busy builder.
 
-use dust::editor::input::{KeyCode, KeyEvent};
-use dust::git::screen::GitScreen;
-use dust::ui::{KeyInputKind, UiEvent};
+use dusty::editor::input::{KeyCode, KeyEvent};
+use dusty::git::screen::GitScreen;
+use dusty::ui::{KeyInputKind, UiEvent};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};

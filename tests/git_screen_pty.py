@@ -16,7 +16,7 @@ def fixture(root):
     git(root, "init", "-b", "main")
     git(root, "config", "user.name", "PTY Test")
     git(root, "config", "user.email", "pty@example.invalid")
-    (root / ".gitignore").write_text(".dust-*\n")
+    (root / ".gitignore").write_text(".dusty-*\n")
     (root / "file.txt").write_text("old\n")
     git(root, "add", ".")
     git(root, "commit", "-m", "Initial")
@@ -91,7 +91,7 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
         fixture(root)
-        config = root / ".dust-config"
+        config = root / ".dusty-config"
         config.mkdir()
         (config / "config.toml").write_text('[ui.git]\nplacement = "fullscreen"\n')
         code, output, snapshots = run(args.standalone.resolve(), tmp, [], [(3, b"q", None)], clean=False, config_home=config, seen_workspace=False)

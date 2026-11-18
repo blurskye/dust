@@ -68,7 +68,7 @@ fn active_tracked_buffer_starts_git_status_and_updates_unsaved_signs_without_exp
     index.add_path(std::path::Path::new("live.txt")).unwrap();
     index.write().unwrap();
     let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
-    let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+    let sig = git2::Signature::now("Dusty", "dusty@example.invalid").unwrap();
     repo.commit(Some("HEAD"), &sig, &sig, "fixture", &tree, &[])
         .unwrap();
     drop(tree);
@@ -148,7 +148,7 @@ fn the_first_hunk_key_reads_the_hunks_and_moves_to_the_next_one() {
     index.add_path(std::path::Path::new("hunks.txt")).unwrap();
     index.write().unwrap();
     let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
-    let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+    let sig = git2::Signature::now("Dusty", "dusty@example.invalid").unwrap();
     repo.commit(Some("HEAD"), &sig, &sig, "fixture", &tree, &[])
         .unwrap();
     drop(tree);
@@ -255,13 +255,13 @@ fn hunk_reset_takes_the_change_under_the_cursor() {
     );
 }
 
-/// Dust's own staging moves the index. The once-a-second check for Git changes made outside
-/// Dust must not take that for someone else's commit and re-read the status, which drops the
+/// Dusty's own staging moves the index. The once-a-second check for Git changes made outside
+/// Dusty must not take that for someone else's commit and re-read the status, which drops the
 /// hunks an open reset prompt was asked about ("Git hunk target changed").
 #[test]
 fn own_staging_is_not_an_outside_change_that_drops_an_open_reset() {
     let (_app_dirs, mut app, repo, path) = near_changes_fixture();
-    // The disk check has seen the repository before Dust stages anything.
+    // The disk check has seen the repository before Dusty stages anything.
     app.next_disk_check = None;
     app.process_disk_changes();
     app.process_effect(AppEffect::GitHunkNavigate(1));
@@ -369,7 +369,7 @@ fn explorer_auto_git_status_colors_names_opens_picker_and_idles() {
     index.add_path(std::path::Path::new("tracked.txt")).unwrap();
     index.write().unwrap();
     let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
-    let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+    let sig = git2::Signature::now("Dusty", "dusty@example.invalid").unwrap();
     repo.commit(Some("HEAD"), &sig, &sig, "fixture", &tree, &[])
         .unwrap();
     drop(tree);
@@ -599,7 +599,7 @@ fn trusted_stage_hunk_flow_changes_only_index_and_refreshes_status() {
         .unwrap();
     index.write().unwrap();
     let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
-    let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+    let sig = git2::Signature::now("Dusty", "dusty@example.invalid").unwrap();
     repo.commit(Some("HEAD"), &sig, &sig, "fixture", &tree, &[])
         .unwrap();
     drop(tree);
@@ -835,7 +835,7 @@ fn git_status_rows_label_each_source_without_conflating_them() {
     {
         let mut index = repo.index().unwrap();
         let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
-        let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+        let sig = git2::Signature::now("Dusty", "dusty@example.invalid").unwrap();
         repo.commit(Some("HEAD"), &sig, &sig, "fixture", &tree, &[])
             .unwrap();
     }
@@ -976,7 +976,7 @@ fn staged_hunk_rows_are_labelled_staged_and_unstaged_rows_are_not() {
     index.add_path(std::path::Path::new("layers.txt")).unwrap();
     index.write().unwrap();
     let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
-    let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+    let sig = git2::Signature::now("Dusty", "dusty@example.invalid").unwrap();
     repo.commit(Some("HEAD"), &sig, &sig, "fixture", &tree, &[])
         .unwrap();
     drop(tree);
@@ -1060,7 +1060,7 @@ fn hunk_unstage_returns_one_staged_hunk_to_head_and_refuses_the_rest() {
     index.add_path(std::path::Path::new("unstage.txt")).unwrap();
     index.write().unwrap();
     let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
-    let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+    let sig = git2::Signature::now("Dusty", "dusty@example.invalid").unwrap();
     repo.commit(Some("HEAD"), &sig, &sig, "fixture", &tree, &[])
         .unwrap();
     drop(tree);
@@ -1196,7 +1196,7 @@ fn the_unstage_key_undoes_the_hunk_just_staged_under_the_cursor() {
     index.add_path(std::path::Path::new("undo.txt")).unwrap();
     index.write().unwrap();
     let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
-    let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+    let sig = git2::Signature::now("Dusty", "dusty@example.invalid").unwrap();
     repo.commit(Some("HEAD"), &sig, &sig, "fixture", &tree, &[])
         .unwrap();
     drop(tree);
@@ -1338,7 +1338,7 @@ fn a_buffer_stays_bound_to_the_worktree_it_was_opened_in() {
 
     assert!(
         app.state.buffers.values().all(|buffer| {
-            buffer.path.as_deref() != Some(std::path::Path::new("/nonexistent-dust/orphan.txt"))
+            buffer.path.as_deref() != Some(std::path::Path::new("/nonexistent-dusty/orphan.txt"))
         }),
         "a nonexistent, unopened document has no buffer binding"
     );
@@ -1692,7 +1692,7 @@ fn the_conflict_surface_shows_the_paused_operation_and_each_side() {
     let (_app_dirs, mut app) = app();
     let repo = history_fixture(&app.state.workspace_root, &["base"]);
     let root = app.state.workspace_root.clone();
-    let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+    let sig = git2::Signature::now("Dusty", "dusty@example.invalid").unwrap();
     let base_tip = repo.head().unwrap().target().unwrap();
     let base_commit = repo.find_commit(base_tip).unwrap();
     // A branch from the base that changes the same path differently, then a real merge.
@@ -1879,7 +1879,7 @@ fn changes_rows_display_index_and_worktree_status_independently() {
     assert!(added.iter().all(|row| row.source == "AM"));
 }
 
-/// A commit made outside Dust shows after the explorer's refresh key.
+/// A commit made outside Dusty shows after the explorer's refresh key.
 #[test]
 fn refreshing_the_explorer_also_refreshes_git_status() {
     let (_app_dirs, mut app) = app();
@@ -2105,7 +2105,7 @@ fn conflict_picker_resolves_paths_from_the_repository_root() {
     let repo = git2::Repository::init(root.path()).unwrap();
     fs::create_dir(root.path().join("sub")).unwrap();
     let path = root.path().join("sub/file.rs");
-    let signature = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+    let signature = git2::Signature::now("Dusty", "dusty@example.invalid").unwrap();
     let commit = |text: &str| {
         fs::write(&path, text).unwrap();
         let mut index = repo.index().unwrap();
@@ -2234,7 +2234,7 @@ fn document_paths_identify_their_worktrees_independently_of_open_requests() {
 
     // A path that cannot be canonicalized has no identity rather than a fabricated one.
     assert!(
-        git2::Repository::discover(std::path::Path::new("/nonexistent-dust/orphan.txt")).is_err(),
+        git2::Repository::discover(std::path::Path::new("/nonexistent-dusty/orphan.txt")).is_err(),
         "a document that does not exist has no worktree"
     );
     let unopened = roots[0].join("never-opened.txt");

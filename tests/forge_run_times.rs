@@ -10,9 +10,9 @@
 #[path = "support/forge_fake.rs"]
 mod forge_fake;
 
-use dust::editor::input::{KeyCode, KeyEvent};
-use dust::git::screen::GitScreen;
-use dust::ui::{KeyInputKind, UiEvent};
+use dusty::editor::input::{KeyCode, KeyEvent};
+use dusty::git::screen::GitScreen;
+use dusty::ui::{KeyInputKind, UiEvent};
 use forge_fake::{FAKE_TOKEN, ForgeServer};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -92,7 +92,7 @@ fn rerun_in(test: &str, world: &str, remote: &str, probe: Option<(&str, &str)>) 
         .env("XDG_DATA_HOME", home.join(".local/share"))
         .env("XDG_STATE_HOME", home.join(".local/state"))
         .env("XDG_CACHE_HOME", home.join(".cache"))
-        .env("DUST_CONFIG_HOME", directory.path().join("config"))
+        .env("DUSTY_CONFIG_HOME", directory.path().join("config"))
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .env("GIT_TERMINAL_PROMPT", "0");
     let output = command.output().unwrap();

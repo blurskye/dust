@@ -216,7 +216,7 @@ impl Default for LspServerConfiguration {
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct LspSessionKey {
-    /// Identity/trust owner of the enclosing Dust workspace root.
+    /// Identity/trust owner of the enclosing Dusty workspace root.
     pub root_id: u64,
     /// Canonical adapter project root selected by the generic project resolver.
     pub project_root: PathBuf,

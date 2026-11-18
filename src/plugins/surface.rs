@@ -1,6 +1,6 @@
 //! Bounded interaction, document and chrome requests from components.
 
-use crate::plugins::component::component_api::dust::plugin::host as wit;
+use crate::plugins::component::component_api::dusty::plugin::host as wit;
 
 #[derive(Clone, Debug)]
 pub(crate) enum SurfaceRequest {

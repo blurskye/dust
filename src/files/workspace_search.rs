@@ -132,7 +132,7 @@ impl WorkspaceSearchWorker {
         let worker_cancellation = Arc::clone(&cancellation);
         let (sender, receiver) = mpsc::sync_channel(policy.event_queue_capacity);
         thread::Builder::new()
-            .name(format!("dust-workspace-search-{stream_id}"))
+            .name(format!("dusty-workspace-search-{stream_id}"))
             .spawn(move || run_workspace_search(stream_id, policy, worker_cancellation, sender))
             .map_err(WorkspaceSearchError::Spawn)?;
         self.cancel();

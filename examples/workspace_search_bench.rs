@@ -2,9 +2,9 @@
 use std::fs;
 use std::time::Instant;
 
-use dust::files::WorkspaceSearchEvent;
-use dust::files::WorkspaceSearchPolicy;
-use dust::files::WorkspaceSearchWorker;
+use dusty::files::WorkspaceSearchEvent;
+use dusty::files::WorkspaceSearchPolicy;
+use dusty::files::WorkspaceSearchWorker;
 use tempfile::tempdir;
 
 fn main() {
@@ -13,7 +13,7 @@ fn main() {
         let path = root.path().join(format!("module-{directory:03}"));
         fs::create_dir(&path).expect("benchmark directory");
         for file in 0..100 {
-            let marker = if file == 42 { " dust-needle" } else { "" };
+            let marker = if file == 42 { " dusty-needle" } else { "" };
             fs::write(
                 path.join(format!("source-{file:03}.rs")),
                 format!("fn item_{directory}_{file}() {{}}{marker}\n"),
@@ -23,7 +23,7 @@ fn main() {
     }
     let policy = WorkspaceSearchPolicy {
         roots: vec![root.path().to_path_buf()],
-        query: "dust-needle".into(),
+        query: "dusty-needle".into(),
         regex: false,
         smart_case: true,
         whole_word: false,
@@ -49,7 +49,7 @@ fn main() {
                 matches += batch.len();
             }
             Some(WorkspaceSearchEvent::Complete { summary, .. }) => {
-                println!("dust_workspace_search_benchmark");
+                println!("dusty_workspace_search_benchmark");
                 println!("files_considered={}", summary.files_considered);
                 println!("files_searched={}", summary.files_searched);
                 println!("matches={matches}");

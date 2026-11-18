@@ -1,4 +1,4 @@
--- Prints a Neovim colorscheme's syntax highlight groups as a Dust theme `[highlights]` table:
+-- Prints a Neovim colorscheme's syntax highlight groups as a Dusty theme `[highlights]` table:
 --   nvim --clean --headless --cmd 'set rtp^=<plugin dir>' -l scripts/nvim-highlights.lua <colorscheme> [dark|light]
 -- With no colorscheme it prints Neovim's default links, the base of assets/defaults/highlights.toml.
 local legacy = {}
@@ -43,7 +43,7 @@ for _, name in ipairs(names) do
     table.insert(fields, ('link = "%s"'):format(group.link))
   else
     for _, key in ipairs({ 'fg', 'bg' }) do
-      -- Normal's background is the editor's; Dust takes it from `[styles]`.
+      -- Normal's background is the editor's; Dusty takes it from `[styles]`.
       if group[key] and scheme and not (name == 'Normal' and key == 'bg') then
         table.insert(fields, ('%s = "#%06x"'):format(key, group[key]))
       end

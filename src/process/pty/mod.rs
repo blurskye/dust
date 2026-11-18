@@ -109,7 +109,7 @@ impl PtyReservation<'_> {
         // The lease lives until controller, reader AND writer have released it.
         let resident = Arc::new(self.slot);
         thread::Builder::new()
-            .name(format!("dust-pty-{}", id.0))
+            .name(format!("dusty-pty-{}", id.0))
             .spawn(move || {
                 struct Finished {
                     finished: Arc<AtomicBool>,
@@ -549,7 +549,7 @@ fn run(
     let read_cancel = cancel.clone();
     let maximum = request.policy.maximum_output_bytes;
     thread::Builder::new()
-        .name(format!("dust-pty-read-{}", id.0))
+        .name(format!("dusty-pty-read-{}", id.0))
         .spawn(move || {
             let _resident = read_resident;
             let result = (|| -> Result<(), String> {
@@ -609,7 +609,7 @@ fn run(
     let writer_stop = Arc::new(AtomicBool::new(false));
     let stop_writer = writer_stop.clone();
     thread::Builder::new()
-        .name(format!("dust-pty-write-{}", id.0))
+        .name(format!("dusty-pty-write-{}", id.0))
         .spawn(move || {
             let _resident = write_resident;
             let result = (|| -> Result<(), String> {

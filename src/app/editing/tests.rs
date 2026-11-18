@@ -286,7 +286,7 @@ fn command_completion_accepts_registry_items_and_preserves_invalid_input() {
     assert!(!app.ui.notification_error);
     assert!(
         app.ui.notification.as_deref().is_some_and(|message| {
-            message.starts_with("Dust health —") && message.contains("terminal test")
+            message.starts_with("Dusty health —") && message.contains("terminal test")
         }),
         "health command result: {:?}",
         app.ui.notification
@@ -1532,12 +1532,12 @@ pub(in crate::app) fn startup_lifecycle_cost_probe() {
         Plugins::fixture_window_clone_count(),
         TextBuffer::test_materializations(),
     );
-    eprintln!("DUST_ALLOC_START");
+    eprintln!("DUSTY_ALLOC_START");
     let start = Instant::now();
     app.queue_startup_reads();
     wait_vfs(&mut app);
     let elapsed = start.elapsed().as_nanos();
-    eprintln!("DUST_ALLOC_END");
+    eprintln!("DUSTY_ALLOC_END");
     let materializations = TextBuffer::test_materializations();
     println!(
         "startup_files=4 bytes_per_file={} elapsed_ns={elapsed} graph_copies={} editor_copies={} host_copies={} text_decodes={} text_displays={}",
@@ -1722,7 +1722,7 @@ fn tutor_moves_on_when_each_step_is_done() {
     // The next step put the cursor on its own practice line.
     next_step(&mut app);
     assert!(title(&app).starts_with("Tutor 16/"), "{}", title(&app));
-    assert_eq!(cursor_line(&app), "Dust is a editor");
+    assert_eq!(cursor_line(&app), "Dusty is a editor");
     // The card says which line, and the gutter marks it.
     let card = app.ui.tutor.as_ref().unwrap();
     let line = card.line.expect("the step's line").1;
@@ -1751,12 +1751,12 @@ fn tutor_moves_on_when_each_step_is_done() {
     app.start_open(practice.join("practice.rs"));
     wait_vfs(&mut app);
     app.tutor_tick();
-    assert_eq!(cursor_line(&app), "Dust is a editor");
+    assert_eq!(cursor_line(&app), "Dusty is a editor");
     app.process_effect(AppEffect::Tutor);
     wait_vfs(&mut app);
     app.tutor_tick();
     assert!(title(&app).starts_with("Tutor 16/"), "{}", title(&app));
-    assert_eq!(cursor_line(&app), "Dust is a editor");
+    assert_eq!(cursor_line(&app), "Dusty is a editor");
     // Quitting moves back home and deletes the practice project.
     app.process_effect(AppEffect::TutorQuit);
     wait_root(&mut app);

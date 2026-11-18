@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run Dust in a real terminal (kitty on a headless X server) and take screenshots.
+"""Run Dusty in a real terminal (kitty on a headless X server) and take screenshots.
 
 Usage:
     scripts/ui-shot SCENARIO [--binary PATH] [--cwd DIR] [--size 120x40 ...] [--out DIR]
@@ -16,7 +16,7 @@ A scenario is a text file with one step per line:
     shot explorer      save OUT/<size>/explorer.png and explorer.txt (screen text)
     # comment
 
-Dust runs with fresh XDG config/state/data/cache directories, so user configuration
+Dusty runs with fresh XDG config/state/data/cache directories, so user configuration
 never leaks into the screenshots. Needs Xvfb, kitty and ImageMagick's `import`.
 """
 
@@ -201,7 +201,7 @@ def wait_for_text(terminal, text, present, limit, where):
     screen = ""
     while time.monotonic() < deadline:
         if not terminal.alive():
-            sys.exit(f"{where}: dust exited while waiting for '{text}'")
+            sys.exit(f"{where}: dusty exited while waiting for '{text}'")
         screen = terminal.remote("get-text", "--extent", "screen", capture=True) or ""
         if (text in screen) == present:
             # One more frame: the text can land a paint ahead of the rest of the screen.
@@ -215,7 +215,7 @@ def wait_for_text(terminal, text, present, limit, where):
 def run(scenario, binary, cwd, size, out):
     columns, rows = (int(part) for part in size.split("x"))
     out.mkdir(parents=True, exist_ok=True)
-    workdir = pathlib.Path(tempfile.mkdtemp(prefix="dust-ui-shot-"))
+    workdir = pathlib.Path(tempfile.mkdtemp(prefix="dusty-ui-shot-"))
     shots = []
     terminal = None
     try:
@@ -227,7 +227,7 @@ def run(scenario, binary, cwd, size, out):
                 continue
             step, _, rest = line.partition(" ")
             if not terminal.alive():
-                sys.exit(f"{scenario}:{number}: dust exited before '{line}'")
+                sys.exit(f"{scenario}:{number}: dusty exited before '{line}'")
             if step == "key":
                 for name in rest.split():
                     terminal.key(name)
@@ -272,7 +272,7 @@ def run(scenario, binary, cwd, size, out):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("scenario", type=pathlib.Path)
-    parser.add_argument("--binary", type=pathlib.Path, default=ROOT / "target/release/dust")
+    parser.add_argument("--binary", type=pathlib.Path, default=ROOT / "target/release/dusty")
     parser.add_argument("--cwd", type=pathlib.Path, default=ROOT)
     parser.add_argument("--size", action="append", help="COLUMNSxROWS, repeatable (default 120x40)")
     parser.add_argument("--out", type=pathlib.Path, default=ROOT / "target/ui-shots")

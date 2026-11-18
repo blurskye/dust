@@ -32,7 +32,7 @@ fn test_app_with(
 
 #[cfg(unix)]
 #[test]
-fn add_tools_runs_once_with_this_dust_and_only_when_allowed() {
+fn add_tools_runs_once_with_this_dusty_and_only_when_allowed() {
     let marker = tempfile::tempdir().unwrap();
     let file = marker.path().join("added");
     let command = vec![
@@ -40,7 +40,7 @@ fn add_tools_runs_once_with_this_dust_and_only_when_allowed() {
         "-c".to_owned(),
         "printf '%s\\n' \"$1\" >> \"$0\"".to_owned(),
         file.display().to_string(),
-        "{dust}".to_owned(),
+        "{dusty}".to_owned(),
     ];
     let set = |allowed: bool| {
         let command = command.clone();
@@ -53,14 +53,17 @@ fn add_tools_runs_once_with_this_dust_and_only_when_allowed() {
     app.add_agent_tools("pi");
     app.add_agent_tools("pi");
     app.add_agent_tools("claude");
-    let dust = std::env::current_exe().unwrap().display().to_string();
+    let dusty = std::env::current_exe().unwrap().display().to_string();
     // The command runs in the background.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     while !file.exists() && std::time::Instant::now() < deadline {
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
     std::thread::sleep(std::time::Duration::from_millis(200));
-    assert_eq!(std::fs::read_to_string(&file).unwrap(), format!("{dust}\n"));
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        format!("{dusty}\n")
+    );
 
     std::fs::remove_file(&file).unwrap();
     let (_dirs, mut app) = test_app_with(set(false));
@@ -119,7 +122,7 @@ fn ctrl_t_starts_the_default_agent_and_asks_only_without_one() {
         config.agents.default = "claude".into();
         config.agents.add_tools = false;
         config.agents.profiles.get_mut("claude").unwrap().program =
-            "/nonexistent/dust-test-agent".into();
+            "/nonexistent/dusty-test-agent".into();
     });
     app.new_agent_tab();
     assert!(app.search.picker().is_none(), "the default needs no asking");
@@ -1179,7 +1182,7 @@ fn agent_restart_failure_keeps_the_submitted_draft() {
         .profiles
         .get_mut(&name)
         .unwrap()
-        .program = "dust-test-missing-adapter".into();
+        .program = "dusty-test-missing-adapter".into();
     app.configuration.install_fixture(config);
     let index = app
         .add_agent_tab(
@@ -1723,7 +1726,7 @@ fn replacing_a_permission_prompt_cancels_the_original_request() {
 #[test]
 fn managed_pi_starts_with_its_private_node_on_path() {
     // A child test process keeps the tool-store and PATH overrides out of other tests.
-    if std::env::var_os("DUST_TEST_MANAGED_PI").is_none() {
+    if std::env::var_os("DUSTY_TEST_MANAGED_PI").is_none() {
         let directory = tempfile::tempdir().unwrap();
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
@@ -1731,8 +1734,8 @@ fn managed_pi_starts_with_its_private_node_on_path() {
                 "app::agent::tests::managed_pi_starts_with_its_private_node_on_path",
                 "--nocapture",
             ])
-            .env("DUST_TEST_MANAGED_PI", "1")
-            .env("DUST_STATE_HOME", directory.path())
+            .env("DUSTY_TEST_MANAGED_PI", "1")
+            .env("DUSTY_STATE_HOME", directory.path())
             .env("PATH", "")
             .output()
             .unwrap();
@@ -2056,7 +2059,7 @@ fn a_subagent_runs_on_the_model_asked_for_or_says_which_ones_there_are() {
     );
     assert_eq!(
         session(Some("gpt-5"), json!({})).choose_subagent_model(),
-        Err("pi does not let Dust choose its model".into())
+        Err("pi does not let Dusty choose its model".into())
     );
     let mut default = session(None, models);
     assert_eq!(default.choose_subagent_model(), Ok(()));

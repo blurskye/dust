@@ -1,7 +1,7 @@
 //! Rust function text objects and a surround operator using syntax captures and native edits.
 // SPDX-License-Identifier: Apache-2.0
 wit_bindgen::generate!({ path: "../../../wit", world: "editor-plugin" });
-use dust::plugin::host;
+use dusty::plugin::host;
 use std::cell::{Cell, RefCell};
 thread_local! {
     static QUERY: RefCell<Option<(u64, host::Snapshot)>> = const { RefCell::new(None) };

@@ -1,23 +1,23 @@
-# Dust on Linux
+# Dusty on Linux
 
 This guide covers everyday editing.
 
 ## Start
 
 ```sh
-dust                 # open the current directory
-dust path/to/file    # open a file
-dust --clean         # ignore user configuration
-dust --safe-mode     # disable plugins, LSP/tasks/debuggers, and session restore
+dusty                 # open the current directory
+dusty path/to/file    # open a file
+dusty --clean         # ignore user configuration
+dusty --safe-mode     # disable plugins, LSP/tasks/debuggers, and session restore
 ```
 
-On first run, Dust asks six setup questions. On any page, press `s` or `Escape`
+On first run, Dusty asks six setup questions. On any page, press `s` or `Escape`
 for **Start editing with defaults**: draft answers are discarded and the dashboard
 is ready. After finishing or skipping, press `t` on the dashboard for **Tutor —
 learn by editing** (also available as `:Tutor`). The tutor never opens automatically.
 Use `:setup` to revisit the questions; skipping it leaves existing settings alone.
 
-A workspace Dust has not seen before asks whether to trust it after the first frame. Press Enter to trust it (LSP servers, tasks and debuggers may then run project code), or Escape to keep editing without those execution paths. Dust remembers that it asked. Use `:trust` later to approve the workspace and `:untrust` to revoke it.
+A workspace Dusty has not seen before asks whether to trust it after the first frame. Press Enter to trust it (LSP servers, tasks and debuggers may then run project code), or Escape to keep editing without those execution paths. Dusty remembers that it asked. Use `:trust` later to approve the workspace and `:untrust` to revoke it.
 
 ACP agents currently remain executable in safe mode and untrusted workspaces;
 they run as ordinary child processes with access to the workspace.
@@ -26,7 +26,7 @@ Press `:` from the dashboard, editor, or explorer to open the command menu. Star
 
 ## Essential editing
 
-Dust uses Vim-style Normal, Insert, Visual, and command-line modes.
+Dusty uses Vim-style Normal, Insert, Visual, and command-line modes.
 
 | Action | Key |
 |---|---|
@@ -56,10 +56,10 @@ Dust uses Vim-style Normal, Insert, Visual, and command-line modes.
 | Workspace grep | `Space /` or `Space s g` |
 
 Yank and paste share the system clipboard, as in LazyVim (`clipboard = "unnamedplus"` under
-`[editor.registers]`; set `"off"` to keep them internal). Dust uses `wl-copy`/`wl-paste`,
+`[editor.registers]`; set `"off"` to keep them internal). Dusty uses `wl-copy`/`wl-paste`,
 `xclip` or `xsel`; without them, yanks reach the terminal clipboard through OSC 52.
 
-`Ctrl-h/j/k/l` moves between editor panes and the explorer. `H`/`L` and `[b`/`]b` switch buffers. The cursor remains visible through wrapping, folds, Unicode text, splits, resize, and explorer/terminal layout changes. During repaint, Dust hides the hardware cursor and publishes its final position within a synchronized terminal update; unchanged frames send no cursor commands. This keeps internal painting movements from appearing as cursor jumps or trails.
+`Ctrl-h/j/k/l` moves between editor panes and the explorer. `H`/`L` and `[b`/`]b` switch buffers. The cursor remains visible through wrapping, folds, Unicode text, splits, resize, and explorer/terminal layout changes. During repaint, Dusty hides the hardware cursor and publishes its final position within a synchronized terminal update; unchanged frames send no cursor commands. This keeps internal painting movements from appearing as cursor jumps or trails.
 
 ## Syntax editing
 
@@ -120,13 +120,13 @@ Open the explorer with `e` on the dashboard, `Space e` in Normal mode, or `:expl
 
 Rename opens the shared **Rename path** prompt, prefilled relative to its displayed workspace root. Edit the path and press Enter; Escape cancels before application. A collision keeps the entered name available for correction. Source inspection is asynchronous; wait for it to finish before submitting. Names are literal (not shell or command-line text), limited to 4096 UTF-8 bytes without controls or `..` traversal. Open dirty buffers and their split views retain their text after rename. `:explorer.rename target=...` remains the direct selected-path command with parent-relative target semantics.
 
-Explorer deletion opens the shared protected **Delete this path?** dialog with **No** selected. Left/Right, Tab, Y/N choose an answer; Enter submits it; Escape cancels without answering. Dust disables positive confirmation until the complete escaped target is visible, so resize a too-small terminal before choosing **Yes**. Deletion requires confirmation; pressing `d` alone never deletes the path.
+Explorer deletion opens the shared protected **Delete this path?** dialog with **No** selected. Left/Right, Tab, Y/N choose an answer; Enter submits it; Escape cancels without answering. Dusty disables positive confirmation until the complete escaped target is visible, so resize a too-small terminal before choosing **Yes**. Deletion requires confirmation; pressing `d` alone never deletes the path.
 
 Explorer mutations are asynchronous, confined to canonical workspace roots, reject overwrite and symlink mutation, and reconcile open buffers. Deleting an open file keeps its text as a dirty recoverable scratch buffer. Recursive copy and deletion of non-empty directories are intentionally refused; empty directories are supported.
 
 ## Finders and search
 
-Dust exposes the daily Telescope/Snacks-style workflows through its bounded picker. `Space /` and `Space s g` open the Grep panel directly—there is no intermediate command prompt—and typing restarts the cancellable live search. File and grep results use a compact result list, live result count, and adaptive file preview: readable panes sit side by side when their measured content fits, otherwise Dust stacks the preview below the results. Grep rows put the matching code first, with a shortened path and coloured line number on the right. Long directory names give way to their initials and then an ellipsis, keeping the filename readable. Previews centre and highlight the selected match line, including in a stacked preview. File previews read up to 256 KiB by default through scoped asynchronous VFS reads (`[ui.picker].maximum_preview_bytes`), so files larger than 120 KiB are not rejected:
+Dusty exposes the daily Telescope/Snacks-style workflows through its bounded picker. `Space /` and `Space s g` open the Grep panel directly—there is no intermediate command prompt—and typing restarts the cancellable live search. File and grep results use a compact result list, live result count, and adaptive file preview: readable panes sit side by side when their measured content fits, otherwise Dusty stacks the preview below the results. Grep rows put the matching code first, with a shortened path and coloured line number on the right. Long directory names give way to their initials and then an ellipsis, keeping the filename readable. Previews centre and highlight the selected match line, including in a stacked preview. File previews read up to 256 KiB by default through scoped asynchronous VFS reads (`[ui.picker].maximum_preview_bytes`), so files larger than 120 KiB are not rejected:
 
 - `Space Space` or `Space f f`: files in the active workspace roots;
 - `Space /` or `Space s g`: workspace text search;
@@ -181,7 +181,7 @@ Code navigation uses `g d` for definition, `g D` for declaration, `g I` for impl
 
 Use `Space c m` or `:lsp` for Tools, `:lsp.server.status` for status, and `:lsp.server.logs` for the live bounded log surface. Tools puts **For this project** first, using all open buffers' languages and the workspace roots' catalog markers (such as `Cargo.toml`, `package.json`, `pyproject.toml`, and `go.mod`). The remaining tools follow under **Other tools**; Tab still switches categories and `/` searches both groups. Opening or refreshing Tools updates the grouping. Rows distinguish **not installed**, **installing**, **installed**, **running**, **failed**, and **blocked: untrusted**; failures explain why in the detail pane. Press `t` to review workspace trust for a blocked tool. Safe mode is shown separately and cannot be bypassed by trusting the workspace.
 
-The existing LSP status-line segment follows the current buffer: `rust-analyzer ✓` means its attached server is ready; startup, restart, failure and trust blocks are named explicitly. `no server: <leader>cm` points to Tools when no server is available. Scratch buffers without a detected language leave the segment empty. A `rust-analyzer` PATH entry that is only a rustup proxy is probed before launch. If its active toolchain lacks the component, Dust shows `failed` with the probe reason instead of looping in `starting`; press `i` on that PATH row to explicitly run bounded, shell-free `rustup component add rust-analyzer` for the active workspace toolchain. Dust never changes the user toolchain automatically. Use `p` to choose a Dust-managed build instead.
+The existing LSP status-line segment follows the current buffer: `rust-analyzer ✓` means its attached server is ready; startup, restart, failure and trust blocks are named explicitly. `no server: <leader>cm` points to Tools when no server is available. Scratch buffers without a detected language leave the segment empty. A `rust-analyzer` PATH entry that is only a rustup proxy is probed before launch. If its active toolchain lacks the component, Dusty shows `failed` with the probe reason instead of looping in `starting`; press `i` on that PATH row to explicitly run bounded, shell-free `rustup component add rust-analyzer` for the active workspace toolchain. Dusty never changes the user toolchain automatically. Use `p` to choose a Dusty-managed build instead.
 
 ## Notifications, tasks, and logs
 
@@ -232,13 +232,13 @@ bundled theme settings). `q` returns to the editor or exits the standalone tool.
 
 Use `1` Changes, `2` Branches, `3` Commits, and `4` Stashes. `Ctrl-h/j/k/l`
 moves between panes; `j/k` selects rows. Source previews and working-tree, staged,
-commit and stash diffs use Dust's syntax highlighting, with line numbers and
+commit and stash diffs use Dusty's syntax highlighting, with line numbers and
 separate addition/deletion markers. In the preview, `h/l` or Left/Right scroll
 horizontally while the line-number gutter stays fixed. Diffs use the full preview
 width by default, with tinted additions/deletions. `|` in the preview opts into
 aligned before/after columns when there is enough room, or returns to unified view. The Changes tree
 expands/collapses with `l/h`. `H/L` cycles Branches, Worktrees, Remotes and Tags. Enter opens files in
-Dust, or `$VISUAL`/`$EDITOR` from the standalone tool. Worktree Enter opens that
+Dusty, or `$VISUAL`/`$EDITOR` from the standalone tool. Worktree Enter opens that
 repository. Branch Enter confirms checkout. `v` switches Changes/All files,
 including highlighted source for clean tracked files. `s` stages a file, `u`
 unstages it and `-` toggles; the same keys stage, unstage or toggle the hunk under
@@ -364,7 +364,7 @@ cursor. Remote writes require explicit form submission.
 
 On a conflicted file, Enter opens a side-selection form; `o/t` choose ours/theirs.
 The replacement stays unstaged until `s`. `C` confirms continuation of a resolved
-merge, using the existing conflict checks. Opening a normal file in Dust preserves
+merge, using the existing conflict checks. Opening a normal file in Dusty preserves
 the Git screen; `Space g g` resumes it.
 
 Inside Dusty Git, `:tutor git` starts the Git tutor: 48 hands-on lessons (panes,
@@ -627,9 +627,9 @@ Tree-sitter function must be available; JavaScript tests and Go subtests do not
 have cursor-test support.
 
 JavaScript/TypeScript current-file launches install the pinned upstream
-`js-debug-adapter` release through Tools. Dust connects to its loopback server
+`js-debug-adapter` release through Tools. Dusty connects to its loopback server
 and follows its child-session request to debug the Node process. The adapter runs
-with Node from PATH, or Dust's managed JavaScript runtime when Node is absent.
+with Node from PATH, or Dusty's managed JavaScript runtime when Node is absent.
 The program itself needs `node` on PATH. TypeScript execution depends on that
 Node version's TypeScript support or the project's configured loader; JSX/TSX
 requires the project's build/loader configuration rather than plain Node.
@@ -652,7 +652,7 @@ permission to run processes gives programs your ordinary user access, not a sand
 Use the existing `:pkgsearch <name>` registry flow for installation and package
 commands for updates; see [registry documentation](registry-client.md).
 
-Start writing a plugin with `dust plugin new mywords`. It creates a standalone
+Start writing a plugin with `dusty plugin new mywords`. It creates a standalone
 Rust crate, production WIT, manifest and README with build, pack and load commands.
 The starter offers buffer-word completion; [the SDK](plugin-sdk.md) and
 [six examples](../examples/plugins/README.md) cover more integrations. A Rust
@@ -660,9 +660,9 @@ Wasm target is required to build guests, but not to use prebuilt components.
 
 ## Recovery and health
 
-Dirty buffers are journaled asynchronously. Use `:recovery`, `:recover`, or the dashboard recovery action after an unclean exit. Dust never overwrites the original file automatically during recovery.
+Dirty buffers are journaled asynchronously. Use `:recovery`, `:recover`, or the dashboard recovery action after an unclean exit. Dusty never overwrites the original file automatically during recovery.
 
-Use `:health`, `dust --health`, or `application.safe_mode.status` to inspect runtime state. `crash.clear` clears retained crash records.
+Use `:health`, `dusty --health`, or `application.safe_mode.status` to inspect runtime state. `crash.clear` clears retained crash records.
 
 ## Configuration
 
@@ -674,25 +674,25 @@ group `order` values still take precedence. Group names follow LazyVim (`file/fi
 
 Current Linux path resolution is:
 
-- Main configuration: `$DUST_CONFIG_HOME/config.toml` when set, otherwise `$XDG_CONFIG_HOME/dust/config.toml`, otherwise `$HOME/.config/dust/config.toml`.
+- Main configuration: `$DUSTY_CONFIG_HOME/config.toml` when set, otherwise `$XDG_CONFIG_HOME/dusty/config.toml`, otherwise `$HOME/.config/dusty/config.toml`.
 - Keymaps and dashboard: `keymaps.toml` and `dashboard.toml` beside the resolved `config.toml`.
 - Installed themes: `themes/*.toml` beside the resolved `config.toml`.
-- State directory: `$DUST_STATE_HOME` when set, otherwise `$XDG_STATE_HOME/dust`, otherwise `$HOME/.local/state/dust`.
+- State directory: `$DUSTY_STATE_HOME` when set, otherwise `$XDG_STATE_HOME/dusty`, otherwise `$HOME/.local/state/dusty`.
 
-Dust accepts those environment paths as supplied, including relative overrides. If no applicable environment/home variable exists, it falls back to `./dust`. Prefer absolute override directories so configuration and state do not depend on the current directory.
+Dusty accepts those environment paths as supplied, including relative overrides. If no applicable environment/home variable exists, it falls back to `./dusty`. Prefer absolute override directories so configuration and state do not depend on the current directory.
 
-Available fields, defaults and bounds are defined by the configuration serializers and validators in `src/config/` and [`assets/defaults/config.toml`](../assets/defaults/config.toml). Bundled mappings and dashboard actions are in [`keymaps.toml`](../assets/defaults/keymaps.toml) and [`dashboard.toml`](../assets/defaults/dashboard.toml). Run `dust --check-config` before restarting after large edits. `:config explain key` shows where a resolved value came from; `:keymap inspect key context` explains a binding.
+Available fields, defaults and bounds are defined by the configuration serializers and validators in `src/config/` and [`assets/defaults/config.toml`](../assets/defaults/config.toml). Bundled mappings and dashboard actions are in [`keymaps.toml`](../assets/defaults/keymaps.toml) and [`dashboard.toml`](../assets/defaults/dashboard.toml). Run `dusty --check-config` before restarting after large edits. `:config explain key` shows where a resolved value came from; `:keymap inspect key context` explains a binding.
 
 
 ### Select a theme
 
 Use `:theme.select` (or `Space u C` from editor Normal mode). Type to filter, then use Up/Down to preview the selected theme on the actual screen. **Enter applies and remembers it in editor state. Escape or Ctrl-C cancels immediately**, restoring the previously chosen theme without saving the preview. This selection dialog uses the configurable `theme_picker` context, rather than the two-Escape result-picker grammar. A newer accepted configuration reload wins over an older preview or pending discovery.
 
-The compact chooser leaves the editor visible for live preview (up to 64 columns and 12 rows by default). It lists **Dust**, **Catppuccin Latte, Frappé, Macchiato and Mocha**, **Gruvbox Dark**, **Nord**, **Tokyo Night / Storm / Moon / Day**, **Rosé Pine / Moon / Dawn**, and validated `themes/<name>.toml` files beside the accepted user `config.toml`. Identical current/catalog entries appear only once. Theme names are left-aligned; `Builtin`, `Installed` or `Saved` provenance is right-aligned. `Current` is separate from the keyboard selection. This uses the common picker row renderer, including plugin-provider pickers; long source labels are clipped to at most a third of the row. The optional `ui.picker.source_separator` is a prefix for that trailing source column (empty by default). Longer lists scroll; other pickers keep their existing size. `builtin.theme` has its own ordinary-window placement rule. The file's declared `name` must match its filename; names use letters, digits, `-` or `_` (up to 96 UTF-8 bytes). Files are regular, non-symlink TOML files of at most 128 KiB, with the existing semantic roles and validated color fallbacks. Discovery examines at most 256 directory entries and loads at most 31 installed files; it reports invalid files and limits instead of silently applying a fallback. `--clean` skips installed-theme discovery, but does not clear editor state; safe mode skips state restoration. Palette sources and MIT/Apache-2.0 license notices are in `assets/themes/README.md` and `LICENSES/`.
+The compact chooser leaves the editor visible for live preview (up to 64 columns and 12 rows by default). It lists **Dusty**, **Catppuccin Latte, Frappé, Macchiato and Mocha**, **Gruvbox Dark**, **Nord**, **Tokyo Night / Storm / Moon / Day**, **Rosé Pine / Moon / Dawn**, and validated `themes/<name>.toml` files beside the accepted user `config.toml`. Identical current/catalog entries appear only once. Theme names are left-aligned; `Builtin`, `Installed` or `Saved` provenance is right-aligned. `Current` is separate from the keyboard selection. This uses the common picker row renderer, including plugin-provider pickers; long source labels are clipped to at most a third of the row. The optional `ui.picker.source_separator` is a prefix for that trailing source column (empty by default). Longer lists scroll; other pickers keep their existing size. `builtin.theme` has its own ordinary-window placement rule. The file's declared `name` must match its filename; names use letters, digits, `-` or `_` (up to 96 UTF-8 bytes). Files are regular, non-symlink TOML files of at most 128 KiB, with the existing semantic roles and validated color fallbacks. Discovery examines at most 256 directory entries and loads at most 31 installed files; it reports invalid files and limits instead of silently applying a fallback. `--clean` skips installed-theme discovery, but does not clear editor state; safe mode skips state restoration. Palette sources and MIT/Apache-2.0 license notices are in `assets/themes/README.md` and `LICENSES/`.
 
 Theme selection does not reload the rest of your configuration or restart tools. The atomic state writer saves the chosen palette snapshot under `metadata["ui.theme.snapshot"]` in `session.json` below the resolved state directory above. It restores on the next launch, including when opening a file directly. Preview alone is never saved. State-save errors are reported; the initial notice says **save requested**, not that disk I/O has already completed. Normal persistence settings apply: disabling persistence or `save_on_exit` disables automatic theme saving; disabling `restore_on_startup` disables restoration. `:config.explain key=ui.theme` and `:config.explain key=theme.styles.accent.foreground` identify the effective editor-state selection. An accepted configuration reload replaces the selection and cancels any older pending theme restore. Child terminal programs still control their own output colors.
 
-**No configuration-file write is needed to remember a choice.** To explicitly override the saved selection, set `theme = "<name>"` in your existing `[ui]` section and use `:config.reload`. Selecting a theme never rewrites configuration files. Bundled names are `dust`, `catppuccin-latte`, `catppuccin-frappe`, `catppuccin-macchiato`, `catppuccin-mocha`, `gruvbox-dark`, `nord`, `tokyo-night`, `tokyo-night-storm`, `tokyo-night-moon`, `tokyo-night-day`, `rose-pine`, `rose-pine-moon` and `rose-pine-dawn`. The 14 bundled palettes work offline; chooser discovery does not download anything. Plugins cannot yet contribute themes through their manifests or WIT—use custom Dust TOML files for now, not executable Neovim theme plugins. For names other than the reserved original `dust`, an installed same-name file takes precedence when loading configuration; malformed installed files are reported, not silently replaced by the bundled palette.
+**No configuration-file write is needed to remember a choice.** To explicitly override the saved selection, set `theme = "<name>"` in your existing `[ui]` section and use `:config.reload`. Selecting a theme never rewrites configuration files. Bundled names are `dusty`, `catppuccin-latte`, `catppuccin-frappe`, `catppuccin-macchiato`, `catppuccin-mocha`, `gruvbox-dark`, `nord`, `tokyo-night`, `tokyo-night-storm`, `tokyo-night-moon`, `tokyo-night-day`, `rose-pine`, `rose-pine-moon` and `rose-pine-dawn`. The 14 bundled palettes work offline; chooser discovery does not download anything. Plugins cannot yet contribute themes through their manifests or WIT—use custom Dusty TOML files for now, not executable Neovim theme plugins. For names other than the reserved original `dusty`, an installed same-name file takes precedence when loading configuration; malformed installed files are reported, not silently replaced by the bundled palette.
 
 ### Toggle the file explorer
 

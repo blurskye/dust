@@ -1,8 +1,8 @@
 //! A repository with no commits (`git init`) is a normal state: the Git tab and every forge
 //! tab open on it without showing Git's stderr (`fatal: bad revision 'HEAD'`).
-use dust::editor::input::{KeyCode, KeyEvent, Modifiers};
-use dust::git::screen::GitScreen;
-use dust::ui::{KeyInputKind, UiEvent};
+use dusty::editor::input::{KeyCode, KeyEvent, Modifiers};
+use dusty::git::screen::GitScreen;
+use dusty::ui::{KeyInputKind, UiEvent};
 use std::process::Command;
 use std::time::{Duration, Instant};
 

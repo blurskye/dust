@@ -1,7 +1,7 @@
 //! Search shows cached hits while typing and streams the forge's results in
 //! below them (F3).
 #![cfg(unix)]
-use dust::editor::input::KeyCode;
+use dusty::editor::input::KeyCode;
 use std::time::{Duration, Instant};
 
 #[path = "support/forge_fake.rs"]
@@ -15,7 +15,7 @@ use records::lists;
 use records::record_rows;
 
 /// Lines of the list pane only (the form sits beside it).
-fn list(screen: &mut dust::git::screen::GitScreen) -> String {
+fn list(screen: &mut dusty::git::screen::GitScreen) -> String {
     view(screen)
         .lines()
         .map(|line| line.chars().take(47).collect::<String>())

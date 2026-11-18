@@ -170,7 +170,7 @@ impl App {
             .collect();
         let result = match self.configuration.user_settings_path() {
             None => {
-                Err("Dust started without a user configuration, so nothing can be saved".into())
+                Err("Dusty started without a user configuration, so nothing can be saved".into())
             }
             Some(path) => create_user_file(&path)
                 .map_err(|error| format!("{}: {error}", path.display()))
@@ -366,13 +366,13 @@ mod tests {
     #[test]
     fn skip_discards_answers_remembers_first_run_and_offers_the_tutor() {
         // Isolate user paths from other tests and from the developer's configuration.
-        if std::env::var_os("DUST_TEST_SETUP_SKIP").is_none() {
+        if std::env::var_os("DUSTY_TEST_SETUP_SKIP").is_none() {
             let root = tempfile::tempdir().unwrap();
             let output = std::process::Command::new(std::env::current_exe().unwrap())
                 .args(["--exact", "app::settings::setup::tests::skip_discards_answers_remembers_first_run_and_offers_the_tutor", "--nocapture"])
-                .env("DUST_TEST_SETUP_SKIP", "1")
-                .env("DUST_CONFIG_HOME", root.path().join("config"))
-                .env("DUST_STATE_HOME", root.path().join("state"))
+                .env("DUSTY_TEST_SETUP_SKIP", "1")
+                .env("DUSTY_CONFIG_HOME", root.path().join("config"))
+                .env("DUSTY_STATE_HOME", root.path().join("state"))
                 .output().unwrap();
             assert!(output.status.success(), "{output:?}");
             assert!(

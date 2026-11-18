@@ -5,9 +5,9 @@
 #![allow(dead_code)]
 
 use super::forge_fake;
-use dust::editor::input::{KeyCode, KeyEvent, Modifiers};
-use dust::git::screen::GitScreen;
-use dust::ui::{KeyInputKind, UiEvent};
+use dusty::editor::input::{KeyCode, KeyEvent, Modifiers};
+use dusty::git::screen::GitScreen;
+use dusty::ui::{KeyInputKind, UiEvent};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -103,7 +103,7 @@ pub fn settle(screen: &mut GitScreen, quiet: Duration) {
 }
 
 pub fn fixture() -> PathBuf {
-    PathBuf::from(std::env::var("DUST_GITHUB_FIXTURE").unwrap())
+    PathBuf::from(std::env::var("DUSTY_GITHUB_FIXTURE").unwrap())
 }
 
 pub fn cache_dir() -> PathBuf {
@@ -132,7 +132,7 @@ pub fn release(name: &str) {
 }
 
 pub fn open() -> GitScreen {
-    GitScreen::open(Path::new(&std::env::var("DUST_GITHUB_ROOT").unwrap())).unwrap()
+    GitScreen::open(Path::new(&std::env::var("DUSTY_GITHUB_ROOT").unwrap())).unwrap()
 }
 
 /// Every cache entry file (not indexes or locks).
@@ -184,7 +184,7 @@ fn git(root: &Path, args: &[&str]) {
 /// Run `name` as a child against a fresh fake forge, repository and cache. Returns `true` in
 /// the parent (the test is done), `false` in the child (run the body).
 pub fn fixture_child(name: &str, world: Value) -> bool {
-    if std::env::var_os("DUST_GITHUB_CHILD").is_some() {
+    if std::env::var_os("DUSTY_GITHUB_CHILD").is_some() {
         return false;
     }
     let owner = tempfile::tempdir().unwrap();
@@ -211,9 +211,9 @@ pub fn fixture_child(name: &str, world: Value) -> bool {
     let output = server
         .configure(&mut Command::new(std::env::current_exe().unwrap()))
         .args(["--exact", name, "--nocapture"])
-        .env("DUST_GITHUB_CHILD", "1")
-        .env("DUST_GITHUB_FIXTURE", &state)
-        .env("DUST_GITHUB_ROOT", &root)
+        .env("DUSTY_GITHUB_CHILD", "1")
+        .env("DUSTY_GITHUB_FIXTURE", &state)
+        .env("DUSTY_GITHUB_ROOT", &root)
         .env("DUSTY_FORGE_CACHE_DIR", owner.path().join("cache"))
         .env_remove("DUSTY_FORGE_WARM")
         .env(

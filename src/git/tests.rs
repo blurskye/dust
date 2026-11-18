@@ -31,7 +31,7 @@ fn commit(repo: &git2::Repository, path: &str, text: &str) {
     index.write().unwrap();
     let tree_id = index.write_tree().unwrap();
     let tree = repo.find_tree(tree_id).unwrap();
-    let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+    let sig = git2::Signature::now("Dusty", "dusty@example.invalid").unwrap();
     let parent = repo.head().ok().and_then(|head| head.peel_to_commit().ok());
     let parents: Vec<&git2::Commit> = parent.iter().collect();
     repo.commit(Some("HEAD"), &sig, &sig, "fixture", &tree, &parents)
@@ -1672,7 +1672,7 @@ fn plan_is_rejected_after_an_external_index_or_head_change() {
     plan.expected_index = Some(git_index_fingerprint(&root).unwrap());
     let tree_id = repo.index().unwrap().write_tree().unwrap();
     let tree = repo.find_tree(tree_id).unwrap();
-    let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+    let sig = git2::Signature::now("Dusty", "dusty@example.invalid").unwrap();
     let parent = repo.head().unwrap().peel_to_commit().unwrap();
     repo.commit(Some("HEAD"), &sig, &sig, "external", &tree, &[&parent])
         .unwrap();
@@ -2483,7 +2483,7 @@ fn conflict_provenance_reports_the_three_sides_from_the_index_on_demand() {
     std::fs::create_dir_all(&root).unwrap();
     let repo = git2::Repository::init(&root).unwrap();
     let root = crate::files::canonicalize(&root).unwrap();
-    let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+    let sig = git2::Signature::now("Dusty", "dusty@example.invalid").unwrap();
 
     // A real conflict: both branches change the same line of the same file.
     std::fs::write(root.join("shared.txt"), "one\n").unwrap();
@@ -2617,7 +2617,7 @@ fn conflicted_fixture_with_extra(root: &Path, extra: Option<&Path>) -> (git2::Oi
     let mut config = repo.config().unwrap();
     config.set_str("user.name", "Test User").unwrap();
     config.set_str("user.email", "test@example.test").unwrap();
-    let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
+    let sig = git2::Signature::now("Dusty", "dusty@example.invalid").unwrap();
     std::fs::write(root.join("shared.txt"), "base\n").unwrap();
     std::fs::write(root.join("untouched.txt"), "original\n").unwrap();
     {
@@ -3461,7 +3461,7 @@ fn a_review_worktree_is_detached_at_the_inspected_revision_and_moves_no_branch()
     index.add_path(std::path::Path::new("review.txt")).unwrap();
     index.write().unwrap();
     let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
-    let signature = git2::Signature::now("dust", "dust@example.com").unwrap();
+    let signature = git2::Signature::now("dusty", "dusty@example.com").unwrap();
     let parent = repo.find_commit(main_head).unwrap();
     let review_oid = repo
         .commit(

@@ -1,7 +1,7 @@
 //! Install this guest twice to observe ordered wrappers around native typing.
 // SPDX-License-Identifier: Apache-2.0
 wit_bindgen::generate!({ path: "../../../wit", world: "editor-plugin" });
-use dust::plugin::host;
+use dusty::plugin::host;
 use std::cell::RefCell;
 thread_local! { static NAME: RefCell<String> = const { RefCell::new(String::new()) }; }
 

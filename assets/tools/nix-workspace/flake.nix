@@ -1,5 +1,5 @@
 {
-  description = "Dust-owned Linux executable compatibility runtime";
+  description = "Dusty-owned Linux executable compatibility runtime";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/b6018f87da91d19d0ab4cf979885689b469cdd41";
 
@@ -42,17 +42,17 @@
           ];
           libraryPath = pkgs.lib.makeLibraryPath runtimeLibraries;
           runtimePath = pkgs.lib.makeBinPath [ pkgs.nodejs pkgs.jdk_headless ];
-          compatRuntime = pkgs.runCommand "dust-linux-compat-runtime" { } ''
-            mkdir -p "$out/bin" "$out/share/dust"
-            ln -s ${pkgs.nix-ld}/bin/nix-ld "$out/bin/dust-nix-ld"
-            ln -s ${pkgs.patchelf}/bin/patchelf "$out/bin/dust-patchelf"
-            cat > "$out/share/dust/runtime.env" <<EOF
-DUST_NIX_RUNTIME_ID=v1-b6018f87da91d19d0ab4cf979885689b469cdd41-common-libraries-1
-DUST_NIX_LOADER=${loader}
-DUST_NIX_LD=${pkgs.nix-ld}/bin/nix-ld
-DUST_NIX_PATCHELF=${pkgs.patchelf}/bin/patchelf
-DUST_NIX_LIBRARY_PATH=${libraryPath}
-DUST_NIX_RUNTIME_PATH=${runtimePath}
+          compatRuntime = pkgs.runCommand "dusty-linux-compat-runtime" { } ''
+            mkdir -p "$out/bin" "$out/share/dusty"
+            ln -s ${pkgs.nix-ld}/bin/nix-ld "$out/bin/dusty-nix-ld"
+            ln -s ${pkgs.patchelf}/bin/patchelf "$out/bin/dusty-patchelf"
+            cat > "$out/share/dusty/runtime.env" <<EOF
+DUSTY_NIX_RUNTIME_ID=v1-b6018f87da91d19d0ab4cf979885689b469cdd41-common-libraries-1
+DUSTY_NIX_LOADER=${loader}
+DUSTY_NIX_LD=${pkgs.nix-ld}/bin/nix-ld
+DUSTY_NIX_PATCHELF=${pkgs.patchelf}/bin/patchelf
+DUSTY_NIX_LIBRARY_PATH=${libraryPath}
+DUSTY_NIX_RUNTIME_PATH=${runtimePath}
 EOF
           '';
         in {

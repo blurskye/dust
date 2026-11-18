@@ -11,24 +11,24 @@ mod forge_fake;
 #[path = "support/forge_world.rs"]
 mod forge_world;
 
-use dust::forge::capability::Cap;
-use dust::forge::host_state;
-use dust::forge::host_state::HostState;
-use dust::forge::http::HttpTransport;
-use dust::forge::model::ItemKind;
-use dust::forge::provider;
-use dust::forge::provider::Conditional;
-use dust::forge::provider::ForgeContext;
-use dust::forge::provider::ProviderKind;
-use dust::forge::provider::RepoRef;
-use dust::forge::request::ForgeError;
-use dust::forge::request::Payload;
-use dust::forge::request::Read;
-use dust::forge::request::Write;
-use dust::forge::transport::ConnectOptions;
-use dust::forge::transport::Endpoints;
-use dust::forge::transport::HostKey;
-use dust::forge::transport::TransportKind;
+use dusty::forge::capability::Cap;
+use dusty::forge::host_state;
+use dusty::forge::host_state::HostState;
+use dusty::forge::http::HttpTransport;
+use dusty::forge::model::ItemKind;
+use dusty::forge::provider;
+use dusty::forge::provider::Conditional;
+use dusty::forge::provider::ForgeContext;
+use dusty::forge::provider::ProviderKind;
+use dusty::forge::provider::RepoRef;
+use dusty::forge::request::ForgeError;
+use dusty::forge::request::Payload;
+use dusty::forge::request::Read;
+use dusty::forge::request::Write;
+use dusty::forge::transport::ConnectOptions;
+use dusty::forge::transport::Endpoints;
+use dusty::forge::transport::HostKey;
+use dusty::forge::transport::TransportKind;
 use forge_world::ALL;
 use forge_world::Forge;
 use forge_world::World;
@@ -415,7 +415,7 @@ fn github_writes_and_sign_in_reads_send_nothing_in_process() {
     }
     for read in [
         Read::Viewer,
-        Read::JobLog(dust::forge::model::ItemId::new("42")),
+        Read::JobLog(dusty::forge::model::ItemId::new("42")),
     ] {
         let error = github
             .read(&ctx, &read, &Conditional::default(), &cancel)
@@ -500,7 +500,7 @@ fn the_rate_budget_is_respected() {
     ctx.set_background(true);
     // A background batch of pull requests sends nothing at all anonymously.
     match read(&ctx, Read::PullRequests(vec![9])).unwrap() {
-        dust::forge::provider::Fetched::Payload {
+        dusty::forge::provider::Fetched::Payload {
             value: Payload::PullRequests(pulls),
             ..
         } => assert!(pulls.is_empty()),

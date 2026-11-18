@@ -643,7 +643,7 @@ fn explorer_lazily_loads_and_opens_scoped_file() {
 #[test]
 fn explorer_uses_filename_and_extension_specific_nerd_font_icons() {
     let (_app_dirs, mut app) = app();
-    fs::write(app.state.workspace_root.join("README.md"), "# Dust\n").unwrap();
+    fs::write(app.state.workspace_root.join("README.md"), "# Dusty\n").unwrap();
     fs::write(app.state.workspace_root.join("notes.md"), "notes\n").unwrap();
     fs::write(app.state.workspace_root.join("main.rs"), "fn main() {}\n").unwrap();
     fs::create_dir_all(app.state.workspace_root.join("src")).unwrap();
@@ -1990,7 +1990,7 @@ fn explorer_owner_cost_probe() {
         crate::editor::EditorState::test_clone_count(),
         crate::editor::text::TextBuffer::test_materializations(),
     );
-    eprintln!("DUST_ALLOC_START");
+    eprintln!("DUSTY_ALLOC_START");
     let start = Instant::now();
     let mut rows = 0;
     for _ in 0..100 {
@@ -2005,7 +2005,7 @@ fn explorer_owner_cost_probe() {
         .len();
     }
     let elapsed = start.elapsed();
-    eprintln!("DUST_ALLOC_END");
+    eprintln!("DUSTY_ALLOC_END");
     let after = crate::editor::text::TextBuffer::test_materializations();
     println!(
         "case=explorer_projection iterations=100 rows_materialized={rows} elapsed_ns={} graph_copies={} editor_copies={} text_decodes={} text_displays={}",

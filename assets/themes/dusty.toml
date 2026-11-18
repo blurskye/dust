@@ -1,4 +1,4 @@
-name = "dust"
+name = "dusty"
 
 [styles.default]
 foreground = "#c9d1d9"
@@ -460,7 +460,7 @@ background_16 = "black"
 attributes = []
 
 [highlights]
-# Dust's own colours, in Neovim's highlight groups.
+# Dusty's own colours, in Neovim's highlight groups.
 "Comment" = { fg = "#8b949e", italic = true }
 "Constant" = { fg = "#79c0ff" }
 "String" = { fg = "#a5d6ff" }

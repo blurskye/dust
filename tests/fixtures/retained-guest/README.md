@@ -1,7 +1,7 @@
-# Maintained Dust component example
+# Maintained Dusty component example
 
 `retained-guest.core.wasm` is built from `src/lib.rs` and a byte-identical copy of
-production `wit/dust-plugin.wit`: **dust:plugin@0.4.0**, world `editor-plugin`.
+production `wit/dusty-plugin.wit`: **dusty:plugin@0.4.0**, world `editor-plugin`.
 It has no WASI imports. Tests wrap its embedded metadata with `wit-component` and
 instantiate it with the real production host; tests never invoke a compiler.
 
@@ -11,13 +11,13 @@ Build from the repository root:
 nix develop .#guest
 cd tests/fixtures/retained-guest
 cargo build --locked --release --target wasm32-unknown-unknown --target-dir target
-cp target/wasm32-unknown-unknown/release/dust_retained_guest.wasm retained-guest.core.wasm
+cp target/wasm32-unknown-unknown/release/dusty_retained_guest.wasm retained-guest.core.wasm
 ```
 
 Keep the fixture-digest test assertions current when rebuilding. The `guest`
 Nix shell includes the Wasm target; the editor's normal build shell does not.
-When changing the ABI, copy `wit/dust-plugin.wit` from the repository root to this
-fixture's `wit/dust-plugin.wit` before rebuilding.
+When changing the ABI, copy `wit/dusty-plugin.wit` from the repository root to this
+fixture's `wit/dusty-plugin.wit` before rebuilding.
 
 The example demonstrates retained and private-cell panels, confirmations, storage,
 picker chunks, read-only virtual documents, traps and runaway interruption. Its

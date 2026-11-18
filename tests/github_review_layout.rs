@@ -1,7 +1,7 @@
 #![cfg(unix)]
-use dust::editor::input::{KeyCode, KeyEvent, Modifiers};
-use dust::git::screen::GitScreen;
-use dust::ui::{Frame, KeyInputKind, UiEvent};
+use dusty::editor::input::{KeyCode, KeyEvent, Modifiers};
+use dusty::git::screen::GitScreen;
+use dusty::ui::{Frame, KeyInputKind, UiEvent};
 use serde_json::{Value, json};
 use std::path::Path;
 use std::process::Command;
@@ -39,12 +39,12 @@ fn view(screen: &mut GitScreen) -> String {
 }
 fn state() -> Value {
     serde_json::from_str(
-        &std::fs::read_to_string(std::env::var("DUST_GITHUB_FIXTURE").unwrap()).unwrap(),
+        &std::fs::read_to_string(std::env::var("DUSTY_GITHUB_FIXTURE").unwrap()).unwrap(),
     )
     .unwrap()
 }
 fn fixture() -> std::path::PathBuf {
-    std::env::var("DUST_GITHUB_FIXTURE").unwrap().into()
+    std::env::var("DUSTY_GITHUB_FIXTURE").unwrap().into()
 }
 /// Under the server's lock: a plain write can be overwritten by the server saving its
 /// request log (D9).
@@ -56,7 +56,7 @@ fn update(change: impl FnOnce(&mut Value)) {
 }
 /// The fake forge server's request log in the gh-CLI form the legacy fixture logged.
 fn calls() -> Vec<Vec<String>> {
-    forge_fake::calls(Path::new(&std::env::var("DUST_GITHUB_FIXTURE").unwrap()))
+    forge_fake::calls(Path::new(&std::env::var("DUSTY_GITHUB_FIXTURE").unwrap()))
 }
 fn idle(screen: &mut GitScreen) {
     let deadline = Instant::now() + Duration::from_secs(30);
@@ -132,7 +132,7 @@ fn cursor_to(screen: &mut GitScreen, needle: &str) {
     );
 }
 fn child(name: &str) -> bool {
-    if std::env::var_os("DUST_REVIEW_LAYOUT_CHILD").is_some() {
+    if std::env::var_os("DUSTY_REVIEW_LAYOUT_CHILD").is_some() {
         return false;
     }
     let owner = tempfile::tempdir().unwrap();
@@ -170,9 +170,9 @@ fn child(name: &str) -> bool {
     let output = server
         .configure(&mut Command::new(std::env::current_exe().unwrap()))
         .args(["--exact", name, "--nocapture"])
-        .env("DUST_REVIEW_LAYOUT_CHILD", "1")
-        .env("DUST_GITHUB_FIXTURE", &state)
-        .env("DUST_GITHUB_ROOT", root)
+        .env("DUSTY_REVIEW_LAYOUT_CHILD", "1")
+        .env("DUSTY_GITHUB_FIXTURE", &state)
+        .env("DUSTY_GITHUB_ROOT", root)
         .env(
             "PATH",
             format!("{}:{}", bin.display(), std::env::var("PATH").unwrap()),
@@ -188,7 +188,7 @@ fn child(name: &str) -> bool {
     true
 }
 fn screen() -> GitScreen {
-    GitScreen::open(Path::new(&std::env::var("DUST_GITHUB_ROOT").unwrap())).unwrap()
+    GitScreen::open(Path::new(&std::env::var("DUSTY_GITHUB_ROOT").unwrap())).unwrap()
 }
 
 #[test]
