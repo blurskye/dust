@@ -13,7 +13,7 @@ pub mod api;
 /// Application composition and ordered event loop.
 pub mod app;
 /// Bundled/user TOML settings, keymaps, dashboard declarations, and platform paths.
-pub mod config;
+pub use dusty_ui::config;
 /// Built-in Debug Adapter Protocol transport and session control.
 pub mod debugger;
 /// Forge providers and the forge worker, from the `dusty-forge` crate.
@@ -30,7 +30,7 @@ pub mod testing;
 /// Typed tool catalog, executable discovery, registry, and explicit installer worker.
 pub mod tools;
 /// Unicode cell-grid presentation and terminal lifecycle.
-pub mod ui;
+pub use dusty_ui as ui;
 
 /// Git operations.
 pub mod git;

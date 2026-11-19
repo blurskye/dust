@@ -44,7 +44,7 @@ pub use package_lock::resolve_manifests;
 pub use package_lock::verify_lock_store;
 pub use package_lock::write_lock_atomic;
 mod mason_catalog;
-pub use mason_catalog::mason_filetype_for_path;
+pub use crate::language::syntax::mason_filetype_for_path;
 mod catalog;
 pub use catalog::DebugProgramPolicy;
 pub use catalog::ManagedFormatter;

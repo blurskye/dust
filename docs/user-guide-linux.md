@@ -681,7 +681,7 @@ Current Linux path resolution is:
 
 Dusty accepts those environment paths as supplied, including relative overrides. If no applicable environment/home variable exists, it falls back to `./dusty`. Prefer absolute override directories so configuration and state do not depend on the current directory.
 
-Available fields, defaults and bounds are defined by the configuration serializers and validators in `src/config/` and [`assets/defaults/config.toml`](../assets/defaults/config.toml). Bundled mappings and dashboard actions are in [`keymaps.toml`](../assets/defaults/keymaps.toml) and [`dashboard.toml`](../assets/defaults/dashboard.toml). Run `dusty --check-config` before restarting after large edits. `:config explain key` shows where a resolved value came from; `:keymap inspect key context` explains a binding.
+Available fields, defaults and bounds are defined by the configuration serializers and validators in `crates/dusty-ui/src/config/` and [`assets/defaults/config.toml`](../assets/defaults/config.toml). Bundled mappings and dashboard actions are in [`keymaps.toml`](../assets/defaults/keymaps.toml) and [`dashboard.toml`](../assets/defaults/dashboard.toml). Run `dusty --check-config` before restarting after large edits. `:config explain key` shows where a resolved value came from; `:keymap inspect key context` explains a binding.
 
 
 ### Select a theme

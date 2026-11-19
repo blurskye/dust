@@ -1,8 +1,6 @@
 //! Tool definitions imported from the Mason catalog.
 
-use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::path::Path;
 use std::sync::OnceLock;
 
 use serde::Deserialize;
@@ -35,7 +33,9 @@ struct MasonCatalogSnapshot {
     schema_version: u32,
     sources: MasonCatalogSources,
     servers: Vec<MasonServerSnapshot>,
-    filetypes: MasonFiletypeSnapshot,
+    /// Neovim's filetype table; `crate::language::syntax` reads and validates it.
+    #[allow(dead_code)]
+    filetypes: serde::de::IgnoredAny,
 }
 
 #[derive(Debug, Deserialize)]
@@ -57,13 +57,6 @@ struct MasonServerSnapshot {
     launch_args: Vec<String>,
     languages: Vec<String>,
     project_root_markers: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct MasonFiletypeSnapshot {
-    extensions: BTreeMap<String, String>,
-    filenames: BTreeMap<String, String>,
 }
 
 fn bounded_text(value: &str) -> bool {
@@ -147,25 +140,6 @@ fn validate_snapshot(snapshot: &MasonCatalogSnapshot) -> Result<(), String> {
             ));
         }
     }
-    for (extension, filetype) in &snapshot.filetypes.extensions {
-        if extension.len() > 128
-            || !bounded_text(extension)
-            || extension.contains('.')
-            || !bounded_text(filetype)
-        {
-            return Err("Mason filetype extension mapping is invalid".into());
-        }
-    }
-    for (filename, filetype) in &snapshot.filetypes.filenames {
-        if filename.len() > 255
-            || !bounded_text(filename)
-            || filename.contains('/')
-            || filename.contains('\\')
-            || !bounded_text(filetype)
-        {
-            return Err("Mason filetype filename mapping is invalid".into());
-        }
-    }
     Ok(())
 }
 
@@ -206,34 +180,7 @@ pub(super) fn mason_lsp_definitions() -> Vec<ToolDefinition> {
         .collect()
 }
 
-#[must_use]
-pub fn mason_filetype_for_path(path: &Path) -> Option<&'static str> {
-    let snapshot = snapshot();
-    if let Some(filename) = path.file_name().and_then(|name| name.to_str())
-        && let Some(filetype) = snapshot.filetypes.filenames.get(filename)
-    {
-        return Some(filetype);
-    }
-    let extension = path.extension()?.to_str()?;
-    snapshot
-        .filetypes
-        .extensions
-        .get(extension)
-        .or_else(|| {
-            snapshot
-                .filetypes
-                .extensions
-                .get(&extension.to_ascii_lowercase())
-        })
-        .map(String::as_str)
-}
-
 #[cfg(test)]
-pub(super) fn mason_snapshot_counts() -> (usize, usize, usize) {
-    let snapshot = snapshot();
-    (
-        snapshot.servers.len(),
-        snapshot.filetypes.extensions.len(),
-        snapshot.filetypes.filenames.len(),
-    )
+pub(super) fn mason_server_count() -> usize {
+    snapshot().servers.len()
 }

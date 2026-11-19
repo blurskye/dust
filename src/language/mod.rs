@@ -3,4 +3,5 @@
 #![forbid(unsafe_code)]
 
 pub mod lsp;
-pub mod syntax;
+/// Highlighting and filetype detection, from the `dusty-ui` crate.
+pub use dusty_ui::syntax;

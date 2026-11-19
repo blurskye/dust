@@ -817,17 +817,17 @@ mod tests {
             let output = std::process::Command::new(std::env::current_exe().unwrap())
                 .args([
                     "--exact",
-                    "forge::tests::forge_commands_disable_prompts_and_bound_output",
+                    "tests::forge_commands_disable_prompts_and_bound_output",
                     "--nocapture",
                 ])
                 .env(FIXTURE, "1")
                 .env("GIT_SSH_COMMAND", "ssh -i /custom/key -p 2222")
                 .output()
                 .unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout);
             assert!(
-                output.status.success(),
-                "{}\n{}",
-                String::from_utf8_lossy(&output.stdout),
+                output.status.success() && stdout.contains("1 passed"),
+                "{stdout}\n{}",
                 String::from_utf8_lossy(&output.stderr)
             );
             return;

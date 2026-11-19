@@ -13,11 +13,12 @@ The repository is one Cargo workspace. Plain `cargo` commands at the root cover 
 |---|---|---|
 | `dusty-core` | `crates/dusty-core/` | `editor/`, `windows/`, `files/`, `process/`, `workspace/`, `persistence/`, `telemetry/` and `clock.rs`, the layers everything else builds on. Nothing in it depends on the rest of Dusty. Its `test-support` feature exposes the clone counters and gated workers that other crates' tests use. |
 | `dusty-forge` | `crates/dusty-forge/` | `forge/`: the GitHub, GitLab, Gitea and Forgejo providers and the worker that runs their requests. It depends only on `dusty-core`. Its `test-support` feature lets tests hand the worker canned replies. |
-| `dusty` | repository root | The editor and Dusty Git. Its library re-exports the core modules and `dusty_forge` as `forge`, so `crate::files` and `crate::forge` paths are unchanged. |
+| `dusty-ui` | `crates/dusty-ui/` | `ui/` (as the crate root), `config/` and `language/syntax/` (as `syntax/`): everything Dusty and Dusty Git put on screen and the settings and themes they draw with. It depends only on `dusty-core`. |
+| `dusty` | repository root | The editor and Dusty Git. Its library re-exports the core modules, `dusty_forge` as `forge`, `dusty_ui` as `ui`, its `config`, and its `syntax` as `language::syntax`, so `crate::files`, `crate::forge`, `crate::config` and `crate::language::syntax` paths are unchanged. |
 
 ## Code owners
 
-Paths in this table are under `src/`, except the `dusty-core` modules, which are under `crates/dusty-core/src/`, and `forge/`, which is `crates/dusty-forge/src/`.
+Paths in this table are under `src/`, except the `dusty-core` modules, which are under `crates/dusty-core/src/`, `forge/`, which is `crates/dusty-forge/src/`, and `ui/`, `config/` and `language/syntax/`, which are `crates/dusty-ui/src/`, `crates/dusty-ui/src/config/` and `crates/dusty-ui/src/syntax/`.
 
 | Module | Owns |
 |---|---|
@@ -154,7 +155,7 @@ LSP and plugins share native matching, selection, snippet insertion, inline
 preview and acceptance. Document edits use checked native transactions or the
 workspace-edit workflow. Stale replies cannot replace current document results.
 
-Tree-sitter is independent of LSP. `language/syntax/` parses buffer snapshots and
+Tree-sitter is independent of LSP. `language/syntax/` (`crates/dusty-ui/src/syntax/`) parses buffer snapshots and
 provides highlights, folds, text objects and bounded queries. Node-kind tables live
 in `assets/defaults/syntax-objects.toml`; `editor/command/builtins/structural.rs`
 owns incremental selection, definition motions and argument-swap transactions. `app/syntax.rs`

@@ -47,7 +47,7 @@ use crate::tools::installer::ToolInstaller;
 
 use crate::tools::installer::ToolOperation;
 
-use crate::tools::mason_catalog::mason_snapshot_counts;
+use crate::tools::mason_catalog::mason_server_count;
 
 use crate::tools::package_lock::valid_digest;
 
@@ -133,11 +133,8 @@ fn bundled_catalog_is_typed_and_has_real_language_and_debug_tools() {
 }
 
 #[test]
-fn pinned_mason_snapshot_has_complete_server_and_filetype_inventories() {
-    let (servers, extensions, filenames) = mason_snapshot_counts();
-    assert_eq!(servers, 291);
-    assert_eq!(extensions, 1_231);
-    assert_eq!(filenames, 407);
+fn pinned_mason_snapshot_has_complete_server_inventory() {
+    assert_eq!(mason_server_count(), 291);
     assert!(
         bundled_tool_catalog()
             .iter()
@@ -2633,4 +2630,75 @@ fn installer_cancellation_terminates_descendant_processes_slot5() {
     cancel.send(()).unwrap();
     assert!(worker.join().unwrap().unwrap_err().contains("cancelled"));
     assert_descendant_stopped(pid);
+}
+
+#[test]
+fn installed_plugin_discovery_uses_and_verifies_activation_digests() {
+    use sha2::Digest;
+    use sha2::Sha256;
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir(root.path().join("activations")).unwrap();
+    let manifest = crate::plugins::PluginManifest {
+        id: "test-plugin".into(),
+        version: "1.0.0".into(),
+        component_sha256: "a".repeat(64),
+        capabilities: Default::default(),
+        commands: Default::default(),
+        contributions: Default::default(),
+    };
+    let source = toml::to_string(&manifest).unwrap();
+    let digest = format!("{:x}", Sha256::digest(source.as_bytes()));
+    assert_ne!(digest, manifest.component_sha256);
+    for activation_sha256 in [Some(digest), None] {
+        let package = crate::tools::LockedPackage {
+            name: manifest.id.clone(),
+            version: manifest.version.clone(),
+            source: crate::tools::PackageSource::Path {
+                path: root.path().into(),
+            },
+            content_sha256: manifest.component_sha256.clone(),
+            activation_sha256,
+            dependencies: vec![],
+        };
+        let path = root.path().join("activations").join(format!(
+            "{}.toml",
+            package
+                .activation_sha256
+                .as_ref()
+                .unwrap_or(&package.content_sha256)
+        ));
+        let verifies_digest = package.activation_sha256.is_some();
+        let lock = crate::tools::PackageLock {
+            version: 1,
+            packages: vec![package],
+            reproducible: false,
+        };
+        std::fs::write(
+            root.path().join("dusty-packages.lock.json"),
+            serde_json::to_vec(&lock).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(&path, &source).unwrap();
+        assert_eq!(
+            crate::tools::installed_plugins(root.path()),
+            std::collections::BTreeSet::from([manifest.id.clone()])
+        );
+        if verifies_digest {
+            std::fs::write(&path, source.replace("1.0.0", "2.0.0")).unwrap();
+            assert!(crate::tools::installed_plugins(root.path()).is_empty());
+        }
+    }
+}
+
+/// A lock file that is a FIFO reads as no installed plugins, without blocking.
+#[cfg(unix)]
+#[test]
+fn installed_plugin_discovery_rejects_a_fifo_lock_without_blocking() {
+    let root = tempfile::tempdir().unwrap();
+    nix::unistd::mkfifo(
+        &root.path().join("dusty-packages.lock.json"),
+        nix::sys::stat::Mode::S_IRUSR,
+    )
+    .unwrap();
+    assert!(crate::tools::installed_plugins(root.path()).is_empty());
 }

@@ -436,7 +436,9 @@ fn workspace_file_picker_publishes_the_full_discovery_byte_budget() {
             app.configuration.binding_revision(),
         )
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(20);
+    // A hang guard, not a speed check: 8000 files take seconds in a debug build, and more
+    // while the rest of the suite runs.
+    let deadline = Instant::now() + Duration::from_secs(60);
     while app.search.files_pending() {
         app.process_workspace_file_events();
         assert!(Instant::now() < deadline);
