@@ -832,7 +832,7 @@ fn default_root() -> Option<PathBuf> {
     if let Some(dir) = std::env::var_os("DUSTY_FORGE_CACHE_DIR").filter(|dir| !dir.is_empty()) {
         return Some(PathBuf::from(dir));
     }
-    if cfg!(test)
+    if cfg!(any(test, feature = "test-support"))
         || std::env::var_os("DUSTY_FORGE_API_BASE").is_some_and(|base| !base.is_empty())
         || std::env::var("DUSTY_FORGE_CACHE").as_deref() == Ok("0")
     {

@@ -1,0 +1,105 @@
+//! Repository status, hunks and mutations, and the Git screen that Dusty embeds and the
+//! `dusty-git` binary runs on its own.
+
+#![forbid(unsafe_code)]
+
+pub(crate) use dusty_core::{editor, files, process, windows};
+pub(crate) use dusty_ui::{config, syntax};
+pub(crate) use {dusty_forge as forge, dusty_ui as ui};
+
+/// Shared native Git application, embedded or standalone.
+pub mod screen;
+
+mod branches;
+mod browse;
+mod command;
+pub use browse::git_browse_url;
+pub use browse::web_base;
+mod conflict;
+pub use conflict::GitConflictChoice;
+pub use conflict::GitConflictEntry;
+pub use conflict::GitConflictError;
+pub use conflict::GitConflictResolveError;
+pub use conflict::GitConflictSide;
+pub use conflict::GitConflictState;
+pub use conflict::GitOperationAction;
+pub use conflict::GitOperationBar;
+pub use conflict::GitOperationStop;
+pub use conflict::GitRecoveryOutcome;
+pub use conflict::GitRecoveryRefusal;
+pub use conflict::GitReplacementError;
+pub use conflict::GitReplacementPlan;
+pub use conflict::abort_operation;
+pub use conflict::apply_replacement;
+pub use conflict::continue_operation;
+pub use conflict::plan_replacement;
+pub use conflict::read_side_content;
+pub use conflict::skip_operation;
+pub use conflict::{read_conflict_state, read_operation_state};
+mod status;
+pub use status::GitChangeSource;
+pub use status::GitChangeSources;
+pub use status::GitFileStatus;
+pub use status::GitRepositoryId;
+pub use status::GitStatusEntry;
+pub use status::GitStatusError;
+pub use status::GitStatusPolicy;
+pub use status::GitStatusRequestId;
+pub use status::GitStatusSnapshot;
+pub use status::GitStatusWorker;
+pub use status::GitUnsavedDocument;
+pub use status::aggregate_git_status;
+pub use status::git_line_counts;
+pub use status::unsaved_document_revision;
+pub use status::validate_unsaved_documents;
+mod hunks;
+pub use branches::GitBranchEntry;
+pub use branches::GitBranchError;
+pub use branches::GitBranchList;
+pub use branches::GitBranchListRequest;
+pub use branches::GitBranchRequest;
+pub use branches::GitBranchRequestId;
+pub use branches::GitBranchResult;
+pub use branches::GitBranchWorker;
+pub use branches::GitSubmoduleEntry;
+pub use branches::GitWorktreeEntry;
+pub use hunks::GitDiffLayer;
+pub use hunks::GitDiffLine;
+pub use hunks::GitDiffLineKind;
+pub use hunks::GitHunk;
+pub use hunks::GitHunkBufferInput;
+pub use hunks::GitHunkError;
+pub use hunks::GitHunkId;
+pub use hunks::GitHunkPolicy;
+pub use hunks::GitHunkRequestId;
+pub use hunks::GitHunkSign;
+pub use hunks::GitHunkSignKind;
+pub use hunks::GitHunkSnapshot;
+pub use hunks::GitHunkWorker;
+pub use hunks::git_hunk_signs;
+pub use hunks::git_staged_signs;
+pub use hunks::index_line_in_buffer;
+pub use hunks::read_hunks;
+pub mod history;
+mod mutation;
+pub mod rewrite;
+pub use mutation::GitChangePlanRequest;
+pub use mutation::GitHeadExpectation;
+pub use mutation::GitHeadId;
+pub use mutation::GitIndexFingerprint;
+pub use mutation::GitMutationError;
+pub use mutation::GitMutationKind;
+pub use mutation::GitMutationRequest;
+pub use mutation::GitMutationRequestId;
+pub use mutation::GitMutationResult;
+pub use mutation::GitMutationWorker;
+pub use mutation::GitResetHunkRequest;
+pub use mutation::GitStageHunkRequest;
+pub use mutation::git_branch_name;
+pub use mutation::git_head_id;
+pub use mutation::git_index_fingerprint;
+pub use mutation::git_last_commit;
+pub use mutation::worktree_hash;
+
+#[cfg(test)]
+mod tests;

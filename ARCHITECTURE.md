@@ -14,11 +14,12 @@ The repository is one Cargo workspace. Plain `cargo` commands at the root cover 
 | `dusty-core` | `crates/dusty-core/` | `editor/`, `windows/`, `files/`, `process/`, `workspace/`, `persistence/`, `telemetry/` and `clock.rs`, the layers everything else builds on. Nothing in it depends on the rest of Dusty. Its `test-support` feature exposes the clone counters and gated workers that other crates' tests use. |
 | `dusty-forge` | `crates/dusty-forge/` | `forge/`: the GitHub, GitLab, Gitea and Forgejo providers and the worker that runs their requests. It depends only on `dusty-core`. Its `test-support` feature lets tests hand the worker canned replies. |
 | `dusty-ui` | `crates/dusty-ui/` | `ui/` (as the crate root), `config/` and `language/syntax/` (as `syntax/`): everything Dusty and Dusty Git put on screen and the settings and themes they draw with. It depends only on `dusty-core`. |
-| `dusty` | repository root | The editor and Dusty Git. Its library re-exports the core modules, `dusty_forge` as `forge`, `dusty_ui` as `ui`, its `config`, and its `syntax` as `language::syntax`, so `crate::files`, `crate::forge`, `crate::config` and `crate::language::syntax` paths are unchanged. |
+| `dusty-git` | `crates/dusty-git/` | `git/` (as the crate root): repository status, hunks, mutations and the Git and forge screens, plus the standalone `dusty-git` binary (`src/main.rs`) and the integration tests that run it. It depends on `dusty-core`, `dusty-forge` and `dusty-ui`. |
+| `dusty` | repository root | The editor and Dusty Git. Its library re-exports the core modules, `dusty_forge` as `forge`, `dusty_ui` as `ui`, `dusty_git` as `git`, its `config`, and its `syntax` as `language::syntax`, so `crate::files`, `crate::forge`, `crate::git`, `crate::config` and `crate::language::syntax` paths are unchanged. |
 
 ## Code owners
 
-Paths in this table are under `src/`, except the `dusty-core` modules, which are under `crates/dusty-core/src/`, `forge/`, which is `crates/dusty-forge/src/`, and `ui/`, `config/` and `language/syntax/`, which are `crates/dusty-ui/src/`, `crates/dusty-ui/src/config/` and `crates/dusty-ui/src/syntax/`.
+Paths in this table are under `src/`, except the `dusty-core` modules, which are under `crates/dusty-core/src/`, `forge/`, which is `crates/dusty-forge/src/`, `git/`, which is `crates/dusty-git/src/`, and `ui/`, `config/` and `language/syntax/`, which are `crates/dusty-ui/src/`, `crates/dusty-ui/src/config/` and `crates/dusty-ui/src/syntax/`.
 
 | Module | Owns |
 |---|---|

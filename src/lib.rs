@@ -33,4 +33,4 @@ pub mod tools;
 pub use dusty_ui as ui;
 
 /// Git operations.
-pub mod git;
+pub use dusty_git as git;

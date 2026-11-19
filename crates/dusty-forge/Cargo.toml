@@ -9,7 +9,8 @@ homepage.workspace = true
 rust-version.workspace = true
 
 [features]
-# Test helpers (canned worker replies) for the crates that build on this one.
+# For the tests of the crates that build on this one: canned worker replies, and no
+# default disk cache (the tests never touch the user's).
 test-support = []
 
 [dependencies]

@@ -60,7 +60,13 @@ impl ForgeServer {
     }
 
     pub fn start_with(state: &Path, world: &str, fixtures: Option<&Path>) -> Self {
-        let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/forge/server.py");
+        // The fixtures live at the workspace root; the tests that include this may belong to a
+        // member crate.
+        let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .map(|dir| dir.join("tests/fixtures/forge/server.py"))
+            .find(|script| script.is_file())
+            .expect("tests/fixtures/forge/server.py in the workspace");
         let mut command = Command::new("python3");
         command
             .arg(script)

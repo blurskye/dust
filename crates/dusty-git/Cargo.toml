@@ -1,0 +1,45 @@
+[package]
+name = "dusty-git"
+description = "Dusty Git: the native Git workspace and forge screens, as a library Dusty embeds and as the standalone dusty-git binary"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+
+[features]
+# For the tests of the crates that build on this one: no drafts in the user's state
+# directory and no probing for installed forge CLIs (and dusty-forge's test support).
+test-support = ["dusty-forge/test-support"]
+
+[dependencies]
+dusty-core.workspace = true
+dusty-forge.workspace = true
+dusty-ui.workspace = true
+clap.workspace = true
+crossterm.workspace = true
+git2.workspace = true
+regex.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+tree-sitter.workspace = true
+tree-sitter-yaml.workspace = true
+unicode-segmentation.workspace = true
+unicode-width.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+nix.workspace = true
+
+[dev-dependencies]
+dusty-core = { workspace = true, features = ["test-support"] }
+dusty-forge = { workspace = true, features = ["test-support"] }
+dusty-ui = { workspace = true, features = ["test-support"] }
+
+[lints]
+workspace = true

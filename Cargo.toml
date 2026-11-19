@@ -27,6 +27,7 @@ rust-version = "1.89"
 dusty-core = { path = "crates/dusty-core", version = "0.4.0" }
 dusty-forge = { path = "crates/dusty-forge", version = "0.4.0" }
 dusty-ui = { path = "crates/dusty-ui", version = "0.4.0" }
+dusty-git = { path = "crates/dusty-git", version = "0.4.0" }
 # The terminal emulator behind Alacritty and Zed, so programs in Dusty's terminals behave as in a
 # real one; Dusty keeps its own PTY processes and only feeds it their output.
 alacritty_terminal = { version = "0.26.0", default-features = false }
@@ -110,6 +111,7 @@ winapi-util = "0.1.11"
 dusty-core.workspace = true
 dusty-forge.workspace = true
 dusty-ui.workspace = true
+dusty-git.workspace = true
 alacritty_terminal.workspace = true
 clap.workspace = true
 crossterm.workspace = true
@@ -193,6 +195,7 @@ static = ["git2/vendored-openssl", "git2/vendored-libgit2"]
 dusty-core = { workspace = true, features = ["test-support"] }
 dusty-forge = { workspace = true, features = ["test-support"] }
 dusty-ui = { workspace = true, features = ["test-support"] }
+dusty-git = { workspace = true, features = ["test-support"] }
 wit-component = "=0.226.0"
 
 [lints]
