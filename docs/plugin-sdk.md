@@ -1,7 +1,7 @@
 # Dusty Component Plugin SDK 0.4
 
 The production contract is [`wit/dusty-plugin.wit`](../wit/dusty-plugin.wit),
-package **`dusty:plugin@0.4.0`**, world `editor-plugin`, shipped with Dusty 0.4.0.
+package **`dusty:plugin@0.4.0`**, world `editor-plugin`, shipped with Dusty 0.3.2.
 Build plugins against this WIT; the plugin ABI version is separate from the editor
 release version. Plugins are Wasm Components, not native libraries, WASI programs,
 or subprocesses.

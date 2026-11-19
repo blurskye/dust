@@ -32,10 +32,10 @@ Download a binary or package from [releases](https://github.com/dustyhq/dusty/re
 
 ```sh
 mkdir -p ~/.local/bin
-install -m 0755 dusty-0.4.0-x86_64-linux ~/.local/bin/dusty
+install -m 0755 dusty-0.3.2-x86_64-linux ~/.local/bin/dusty
 ```
 
-The `.tar.zst` archive and the packages also install `dusty-git`, and `dusty-git-0.4.0-x86_64-linux` is the bare binary. Ensure `~/.local/bin` is on your `PATH`. Debian, RPM, pacman, AppImage and Flatpak instructions and checksum verification are in the [Linux release guide](docs/release-linux.md).
+The `.tar.zst` archive and the packages also install `dusty-git`, and `dusty-git-0.3.2-x86_64-linux` is the bare binary. Ensure `~/.local/bin` is on your `PATH`. Debian, RPM, pacman, AppImage and Flatpak instructions and checksum verification are in the [Linux release guide](docs/release-linux.md).
 
 To build from source, use the pinned Rust toolchain plus a C compiler, `pkg-config`, OpenSSL and zlib development files, or enter the Nix development shell:
 
@@ -49,10 +49,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for tests and plugin-fixture builds.
 
 ## Install on macOS
 
-Download `dusty-0.4.0-aarch64-macos.tar.gz` for Apple Silicon or `dusty-0.4.0-x86_64-macos.tar.gz` for Intel from [releases](https://github.com/dustyhq/dusty/releases). Check the archive's SHA-256 against its entry in `SHA256SUMS`, then extract and install it:
+Download `dusty-0.3.2-aarch64-macos.tar.gz` for Apple Silicon or `dusty-0.3.2-x86_64-macos.tar.gz` for Intel from [releases](https://github.com/dustyhq/dusty/releases). Check the archive's SHA-256 against its entry in `SHA256SUMS`, then extract and install it:
 
 ```sh
-tar -xzf dusty-0.4.0-aarch64-macos.tar.gz
+tar -xzf dusty-0.3.2-aarch64-macos.tar.gz
 mkdir -p ~/.local/bin
 install -m 0755 dusty dusty-git ~/.local/bin/
 ```
@@ -67,11 +67,11 @@ See the [macOS and Windows guide](docs/user-guide-macos-windows.md) for configur
 
 ## Install on Windows
 
-Download `dusty-0.4.0-x86_64-windows.zip` from [releases](https://github.com/dustyhq/dusty/releases) and check its SHA-256 against its entry in `SHA256SUMS`. In PowerShell:
+Download `dusty-0.3.2-x86_64-windows.zip` from [releases](https://github.com/dustyhq/dusty/releases) and check its SHA-256 against its entry in `SHA256SUMS`. In PowerShell:
 
 ```powershell
-Get-FileHash dusty-0.4.0-x86_64-windows.zip
-Expand-Archive dusty-0.4.0-x86_64-windows.zip -DestinationPath "$env:LOCALAPPDATA\Programs\Dusty"
+Get-FileHash dusty-0.3.2-x86_64-windows.zip
+Expand-Archive dusty-0.3.2-x86_64-windows.zip -DestinationPath "$env:LOCALAPPDATA\Programs\Dusty"
 ```
 
 Add `%LOCALAPPDATA%\Programs\Dusty` to your user `PATH` and run `dusty` (or `dusty-git`) in Windows Terminal. The binary is not Authenticode signed, so SmartScreen may ask before the first run. The [macOS and Windows guide](docs/user-guide-macos-windows.md) covers configuration paths, shells and what differs on Windows.

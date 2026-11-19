@@ -651,7 +651,7 @@ checksum = "75b325c5dbd37f80359721ad39aca5a29fb04c89279657cffdda8736d0c0b9d2"
 
 [[package]]
 name = "dusty"
-version = "0.4.0"
+version = "0.3.2"
 dependencies = [
  "alacritty_terminal",
  "clap",
@@ -732,7 +732,7 @@ dependencies = [
 
 [[package]]
 name = "dusty-core"
-version = "0.4.0"
+version = "0.3.2"
 dependencies = [
  "git2",
  "globset",
@@ -756,7 +756,7 @@ dependencies = [
 
 [[package]]
 name = "dusty-forge"
-version = "0.4.0"
+version = "0.3.2"
 dependencies = [
  "clap",
  "dusty-core",
@@ -774,7 +774,7 @@ dependencies = [
 
 [[package]]
 name = "dusty-git"
-version = "0.4.0"
+version = "0.3.2"
 dependencies = [
  "clap",
  "crossterm",
@@ -799,7 +799,7 @@ dependencies = [
 
 [[package]]
 name = "dusty-ui"
-version = "0.4.0"
+version = "0.3.2"
 dependencies = [
  "alacritty_terminal",
  "crossterm",

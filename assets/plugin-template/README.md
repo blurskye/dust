@@ -15,7 +15,7 @@ cargo build --locked --release --target wasm32-unknown-unknown
 
 ## Pack
 
-Use the packer in a Dusty 0.4.0 source checkout. Set `DUSTY_SOURCE` to its absolute
+Use the packer in a Dusty 0.3.2 source checkout. Set `DUSTY_SOURCE` to its absolute
 path, then run from this plugin directory in the host development shell:
 
 ```sh

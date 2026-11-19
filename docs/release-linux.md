@@ -1,6 +1,6 @@
 # Linux release
 
-The current release version is **0.4.0**. Package versions come from `Cargo.toml`;
+The current release version is **0.3.2**. Package versions come from `Cargo.toml`;
 keep its entry in `Cargo.lock` and the AppStream release in
 `packaging/dev.dustyhq.Dusty.metainfo.xml` in sync when releasing.
 
@@ -26,7 +26,7 @@ while the AppImage and the Flatpak hold the editor only (Dusty Git is `Space g g
 | `dusty-X.Y.Z-x86_64-linux.AppImage` | `chmod +x dusty-X.Y.Z-x86_64-linux.AppImage && ./dusty-X.Y.Z-x86_64-linux.AppImage` |
 | `dusty-X.Y.Z-x86_64.flatpak` | `flatpak install --user ./dusty-X.Y.Z-x86_64.flatpak`, then `flatpak run dev.dustyhq.Dusty`; `flatpak run --command=dusty-git dev.dustyhq.Dusty` opens Dusty Git |
 
-Replace `X.Y.Z` with `0.4.0` for this release. Run Dusty from a terminal and ensure
+Replace `X.Y.Z` with `0.3.2` for this release. Run Dusty from a terminal and ensure
 `~/.local/bin` is on `PATH` when installing the bare binary there.
 
 In the Flatpak, programs Dusty starts (shells, language servers, git) come from
