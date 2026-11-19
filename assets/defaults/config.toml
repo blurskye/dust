@@ -445,11 +445,12 @@ environment = {}
 acp_environment = { OPENCODE_CONFIG_CONTENT = '{"tools":{"task":false}}' }
 options = {}
 
-# Antigravity CLI 1.5.0 or newer; sign in once with `agy` or `agy acp --login`.
+# Antigravity CLI 1.5.0 or newer; sign in once with `agy` or `agy acp --login`. Its telemetry
+# is off over ACP; `agy` in a terminal has no switch for it.
 [agents.profiles.antigravity]
 program = "agy"
 cli = ["agy"]
-arguments = ["acp"]
+arguments = ["acp", "--disable-telemetry"]
 environment = {}
 options = {}
 

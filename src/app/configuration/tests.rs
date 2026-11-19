@@ -1645,7 +1645,7 @@ pub(in crate::app) fn the_antigravity_profile_runs_agy_over_acp() {
     let profiles = &app.configuration.settings().agents.profiles;
     let antigravity = &profiles["antigravity"];
     assert_eq!(antigravity.program, std::path::Path::new("agy"));
-    assert_eq!(antigravity.arguments, ["acp"]);
+    assert_eq!(antigravity.arguments, ["acp", "--disable-telemetry"]);
     assert_eq!(antigravity.cli, ["agy"]);
     assert!(
         !profiles.contains_key("gemini"),
