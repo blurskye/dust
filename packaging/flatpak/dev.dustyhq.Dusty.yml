@@ -1,4 +1,4 @@
-# Flatpak of the static release binary. Programs Dusty starts (shells, language
+# Flatpak of the static editor binary (Dusty Git ships as its own packages). Programs Dusty starts (shells, language
 # servers, git) run inside the sandbox with the Freedesktop runtime, not the host's;
 # `flatpak-spawn --host` reaches host programs.
 id: dev.dustyhq.Dusty
@@ -15,7 +15,6 @@ modules:
     buildsystem: simple
     build-commands:
       - install -Dm 0755 dusty /app/bin/dusty
-      - install -Dm 0755 dusty-git /app/bin/dusty-git
       - install -Dm 0644 dev.dustyhq.Dusty.desktop /app/share/applications/dev.dustyhq.Dusty.desktop
       - install -Dm 0644 dev.dustyhq.Dusty.svg /app/share/icons/hicolor/scalable/apps/dev.dustyhq.Dusty.svg
       - install -Dm 0644 dev.dustyhq.Dusty.metainfo.xml /app/share/metainfo/dev.dustyhq.Dusty.metainfo.xml
@@ -23,8 +22,6 @@ modules:
     sources:
       - type: file
         path: ../../target/package-stage/dusty/dusty
-      - type: file
-        path: ../../target/package-stage/dusty/dusty-git
       - type: file
         path: ../dev.dustyhq.Dusty.desktop
       - type: file

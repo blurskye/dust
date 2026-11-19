@@ -1,0 +1,27 @@
+# deb, rpm and pacman packages of the static Dusty Git binary, built by
+# packaging/build-packages.sh. The editor is its own package (nfpm-dusty.yaml).
+name: dusty-git
+arch: amd64
+platform: linux
+version: ${VERSION}
+release: 1
+section: vcs
+priority: optional
+maintainer: blurskye <blurskye@proton.me>
+description: Terminal Git workspace with staging, history and forge pull requests, issues and CI.
+vendor: blurskye
+homepage: https://github.com/dustyhq/dusty
+license: GPL-3.0-or-later
+recommends:
+  - git
+contents:
+  - src: target/package-stage/dusty-git/dusty-git
+    dst: /usr/bin/dusty-git
+    file_info: { mode: 0755 }
+  - src: LICENSE
+    dst: /usr/share/licenses/dusty-git/LICENSE
+  - src: NOTICE
+    dst: /usr/share/licenses/dusty-git/NOTICE
+  - src: LICENSES/
+    dst: /usr/share/licenses/dusty-git/LICENSES
+    type: tree

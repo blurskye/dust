@@ -1028,7 +1028,7 @@ impl App {
                 )
             }),
             "agent" => (!self.any_agent_installed()).then(|| {
-                "No coding agent (claude, codex, pi, opencode, gemini) is installed, so no session can start here. Install one and `<leader>` `c` `m` adds its adapter; `:TutorNext` skips this step.".to_owned()
+                "No coding agent (claude, codex, pi, opencode, agy) is installed, so no session can start here. Install one and `<leader>` `c` `m` adds its adapter; `:TutorNext` skips this step.".to_owned()
             }),
             programs => programs
                 .split_whitespace()

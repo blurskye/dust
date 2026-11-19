@@ -385,7 +385,7 @@ close_on_exit = true
 # ACP agents for `<leader>a`. Each session runs in the worktree that was open when it
 # started. Every agent that supports MCP gets Dusty's `agent` tool for subagents, which run
 # as tabs of their own. The Claude, Codex and pi adapters can be installed from the tool manager
-# (`<leader>cm`, Agent); OpenCode and Gemini speak ACP themselves. `options` picks a model,
+# (`<leader>cm`, Agent); OpenCode and Antigravity speak ACP themselves. `options` picks a model,
 # mode or thinking level at start, e.g. `options = { model = "…", thought_level = "high" }`.
 [agents]
 default = "claude"
@@ -445,10 +445,11 @@ environment = {}
 acp_environment = { OPENCODE_CONFIG_CONTENT = '{"tools":{"task":false}}' }
 options = {}
 
-[agents.profiles.gemini]
-program = "gemini"
-cli = ["gemini"]
-arguments = ["--experimental-acp"]
+# Antigravity CLI 1.5.0 or newer; sign in once with `agy` or `agy acp --login`.
+[agents.profiles.antigravity]
+program = "agy"
+cli = ["agy"]
+arguments = ["acp"]
 environment = {}
 options = {}
 

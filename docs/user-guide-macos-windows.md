@@ -7,9 +7,11 @@ virtual terminal support.
 
 ## Release archives
 
-Use `dusty-<version>-aarch64-macos.tar.gz` for Apple Silicon,
-`dusty-<version>-x86_64-macos.tar.gz` for Intel Macs and
-`dusty-<version>-x86_64-windows.zip` for Windows. Check the archive's SHA-256
+Use `dusty-aarch64-macos.tar.gz` for Apple Silicon, `dusty-x86_64-macos.tar.gz` for
+Intel Macs and `dusty-x86_64-windows.zip` for Windows. The editor has Dusty Git built in
+(`Space g g`); to run Dusty Git on its own, `dusty-git-aarch64-macos.tar.gz`,
+`dusty-git-x86_64-macos.tar.gz` and `dusty-git-x86_64-windows.zip` hold the `dusty-git`
+binary. Check the archive's SHA-256
 (`shasum -a 256 <archive>` on macOS, `Get-FileHash <archive>` in PowerShell)
 against its entry in `SHA256SUMS` before running it. The checksum file also has a
 Sigstore signature, as described in the [release guide](release-linux.md). This

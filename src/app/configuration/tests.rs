@@ -1640,6 +1640,20 @@ pub(in crate::app) fn the_pi_profile_adds_dusty_tools_to_pi() {
 }
 
 #[test]
+pub(in crate::app) fn the_antigravity_profile_runs_agy_over_acp() {
+    let (_app_dirs, app) = app();
+    let profiles = &app.configuration.settings().agents.profiles;
+    let antigravity = &profiles["antigravity"];
+    assert_eq!(antigravity.program, std::path::Path::new("agy"));
+    assert_eq!(antigravity.arguments, ["acp"]);
+    assert_eq!(antigravity.cli, ["agy"]);
+    assert!(
+        !profiles.contains_key("gemini"),
+        "Gemini CLI was replaced by Antigravity CLI"
+    );
+}
+
+#[test]
 pub(in crate::app) fn agents_own_subagents_are_off_over_acp_only() {
     let (_app_dirs, app) = app();
     let profiles = &app.configuration.settings().agents.profiles;

@@ -3,8 +3,8 @@
 #![forbid(unsafe_code)]
 
 //! Agent Client Protocol (ACP) client. An agent such as Claude Code (`claude-agent-acp`),
-//! Codex (`codex-acp`), pi (`pi-acp`), OpenCode (`opencode acp`) or Gemini CLI
-//! (`gemini --experimental-acp`) runs as a child process and speaks JSON-RPC 2.0 as one
+//! Codex (`codex-acp`), pi (`pi-acp`), OpenCode (`opencode acp`) or Antigravity CLI
+//! (`agy acp`) runs as a child process and speaks JSON-RPC 2.0 as one
 //! JSON object per line on stdin/stdout.
 
 use crate::language::lsp::file_uri;
@@ -287,8 +287,8 @@ fn parse_line(line: &str) -> Option<AgentMessage> {
     }
 }
 
-/// A JSON-RPC error's message, with the detail agents put in `data` (Gemini's "Internal
-/// error" says what is wrong only there).
+/// A JSON-RPC error's message, with the detail some agents put only in `data` (an "Internal
+/// error" message alone says nothing about what is wrong).
 fn error_text(error: &Value) -> String {
     let message = error
         .get("message")

@@ -1,5 +1,5 @@
-# deb, rpm and pacman packages of the static release binary, built by
-# packaging/build-packages.sh.
+# deb, rpm and pacman packages of the static editor binary, built by
+# packaging/build-packages.sh. Dusty Git is its own package (nfpm-dusty-git.yaml).
 name: dusty
 arch: amd64
 platform: linux
@@ -17,9 +17,6 @@ recommends:
 contents:
   - src: target/package-stage/dusty/dusty
     dst: /usr/bin/dusty
-    file_info: { mode: 0755 }
-  - src: target/package-stage/dusty/dusty-git
-    dst: /usr/bin/dusty-git
     file_info: { mode: 0755 }
   - src: packaging/dev.dustyhq.Dusty.desktop
     dst: /usr/share/applications/dev.dustyhq.Dusty.desktop
