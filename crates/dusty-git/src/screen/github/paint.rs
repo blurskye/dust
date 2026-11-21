@@ -336,8 +336,11 @@ pub(in crate::screen) fn frame(app: &mut GitScreen, width: u16, height: u16) -> 
             )
         }));
     let mode_icons = app.icon_mode;
-    // Set again by the list while a filter is typed.
-    app.github.live_pick = None;
+    let live = app.github.live_rows();
+    app.github.live_pick = live
+        .as_ref()
+        .and_then(|live| live.local.first().or(live.remote.first()))
+        .cloned();
     let geometry = geometry(&app.github, width, height);
     let reply = app.form.as_ref().filter(|form| {
         matches!(
@@ -355,6 +358,7 @@ pub(in crate::screen) fn frame(app: &mut GitScreen, width: u16, height: u16) -> 
             filter,
             mode_icons,
             geometry.mode,
+            live.as_ref(),
         );
     }
     if let Some(rect) = geometry.reader {
@@ -398,6 +402,7 @@ fn list(
     filter: Option<&super::super::Form>,
     mode: ExplorerIconMode,
     layout_mode: Mode,
+    live: Option<&super::fresh::LiveRows>,
 ) {
     let focused = workspace.focus < 2;
     let pull = workspace.page == 2;
@@ -580,11 +585,10 @@ fn list(
     state_row(frame, workspace, x, y, right, mode);
     y += 1;
     // Records.
-    let live = workspace.live_rows();
     let flash = std::mem::take(&mut workspace.fresh.flash);
     let mut entries = Vec::new();
     let rows_owned: Vec<Value>;
-    match &live {
+    match live {
         Some(live) => {
             entries.extend(live.local.iter().map(Entry::Record));
             // The forge's divider shows while it searches and when it adds results.
@@ -628,18 +632,13 @@ fn list(
         );
         y += 1;
     }
-    // The reader follows the first match while a filter is typed.
-    workspace.live_pick = live
-        .as_ref()
-        .and_then(|live| live.local.first().or(live.remote.first()))
-        .map(|row| number(row, "number"));
     let selected = if live.is_some() {
         entries
             .iter()
             .position(|entry| matches!(entry, Entry::Record(_)))
             .unwrap_or(usize::MAX)
     } else {
-        workspace.selected[at]
+        visible_index(entries.len(), workspace.selected[at]).unwrap_or(usize::MAX)
     };
     // The match count is the footer's `Showing N`; no line above the rows repeats it.
     let bottom = inner.bottom().saturating_sub(1);
@@ -1819,6 +1818,16 @@ pub(super) fn record_rows(
             super::prose::blank(),
             super::prose::muted(&words.hint),
         ]
+    } else if workspace.live_filter() && workspace.number() == 0 {
+        let what = if workspace.page == 1 {
+            "issues"
+        } else {
+            workspace.terms().pr_plural
+        };
+        vec![super::prose::muted(&format!(
+            "No {} match this filter",
+            what.to_ascii_lowercase()
+        ))]
     } else if workspace.page == 1 {
         issue::rows(workspace, width, mode)
     } else {
@@ -2677,10 +2686,7 @@ fn footer(app: &GitScreen, frame: &mut Frame, rect: Rect, filter: bool) {
         ("Enter", enter)
     };
     // An empty list offers what can fill it, nothing that needs a row.
-    let empty = matches!(workspace.page, 1 | 2)
-        && matches!(workspace.cache.get(&workspace.list_key()), Some(Ok(_)))
-        && workspace.items().is_empty()
-        && !workspace.inbox.enabled;
+    let empty = forge_page && workspace.number() == 0;
     // A list that could not load offers only what can fix it; the reader says why.
     let failed = matches!(workspace.page, 1 | 2)
         && !workspace.inbox.enabled
@@ -2728,7 +2734,8 @@ fn footer(app: &GitScreen, frame: &mut Frame, rect: Rect, filter: bool) {
     };
     let hints: Vec<(&str, &str)> = match (workspace.page, reader) {
         // Signed out, the read-only rule below adds `@ sign in`.
-        (_, false) if failed => vec![("R", "retry"), ("@", at)],
+        (_, _) if failed && empty => vec![("R", "retry"), ("@", at)],
+        (_, true) if empty => vec![("Esc", "list"), ("n", new_item), ("/", "filter")],
         (_, false) if empty => vec![("n", new_item), ("/", "filter"), ("[ ]", "sections")],
         // `n New issue` in every Issues list footer, rows or none (R16 issues-02).
         (1, false) => vec![

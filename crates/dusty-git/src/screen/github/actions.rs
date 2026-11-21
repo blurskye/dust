@@ -940,6 +940,8 @@ impl Workspace {
                 };
                 let active = self.active_views[self.page.saturating_sub(1).min(1)].clone();
                 self.apply_view(query.trim().to_owned(), state.clone(), active)?;
+                self.live_input(None);
+                self.live_pick = None;
                 self.drafts.remove(&self.draft_key(&action));
                 return Ok(());
             }
@@ -1268,12 +1270,13 @@ impl Workspace {
                 }
             }
             Action::Cancel(id) => Write::CancelRun((*id).into()),
-            Action::Rerun(_)
+            Action::Rerun(id)
                 if values
                     .first()
                     .is_some_and(|value| value.starts_with("This job"))
                     && self.actions.rerun_job.is_some() =>
             {
+                self.actions.rerun_job_run = Some(*id);
                 Write::RerunJob(self.actions.rerun_job.unwrap_or_default().into())
             }
             Action::Rerun(id) => Write::Rerun {

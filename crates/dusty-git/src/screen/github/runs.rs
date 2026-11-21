@@ -75,7 +75,8 @@ pub(super) struct View {
     /// The workflow the list keeps when the forge lists none (Forgejo): its runs' names.
     workflow: Option<String>,
     filter: Input,
-    /// A run opened from elsewhere (a pull request's check) stays shown though not listed.
+    /// A run opened from elsewhere (a pull request's check), or one just re-run, stays shown
+    /// though not listed, until the cursor moves.
     pinned: bool,
     /// The run attempt the tree below belongs to; another one starts from the defaults.
     tree_for: String,
@@ -109,6 +110,8 @@ pub(super) struct View {
     /// The finished job the open rerun sheet offers alone (`This job (lint)`): the one under
     /// the run cursor when `r` was pressed.
     pub(super) rerun_job: Option<u64>,
+    /// The run a sent `This job` rerun belongs to: its reply names only the job.
+    pub(super) rerun_job_run: Option<u64>,
     /// Log bodies by what they were read from (`Workspace::log_body`).
     log_memo: std::sync::Mutex<std::collections::HashMap<u64, Body>>,
     /// `v`/`V`: the log line a selection started on; the cursor is its other end.
@@ -913,10 +916,59 @@ impl Workspace {
         tabs
     }
 
-    fn run_cursor(&self, runs: &[&Value]) -> usize {
+    fn run_cursor(&self, runs: &[&Value]) -> Option<usize> {
         self.run_id
             .and_then(|id| runs.iter().position(|run| number(run, "databaseId") == id))
-            .unwrap_or_else(|| self.run_selected.min(runs.len().saturating_sub(1)))
+            .or_else(|| visible_index(runs.len(), self.run_selected))
+    }
+
+    fn run_target(&self) -> Option<u64> {
+        if self.actions.pinned {
+            return self.run_id;
+        }
+        let runs = self.shown_runs();
+        Some(number(runs[self.run_cursor(&runs)?], "databaseId"))
+    }
+
+    fn empty_runs(&self) -> (String, GitRole) {
+        let key = Key::Runs(self.workflow_id());
+        let noun = self.actions_noun();
+        match self.cache.get(&key) {
+            Some(Err(error)) => (calm(self, error), GitRole::Removed),
+            None => match self.blocked(&key) {
+                Some((headline, hint)) => (format!("{headline} · {hint}"), GitRole::Muted),
+                None => ("Loading…".into(), GitRole::Muted),
+            },
+            Some(Ok(_)) if self.runs().is_empty() => (format!("No {noun}s yet"), GitRole::Muted),
+            Some(Ok(_)) => match self.actions.section {
+                1 => ("Nothing is failing".into(), GitRole::Added),
+                2 => ("Nothing is running".into(), GitRole::Muted),
+                3 => (format!("None of these {noun}s are yours"), GitRole::Muted),
+                _ => (format!("No {noun}s match these filters"), GitRole::Muted),
+            },
+        }
+    }
+
+    fn actions_failure_hints(&self) -> Option<Vec<(&'static str, &'static str)>> {
+        let key = Key::Runs(self.workflow_id());
+        let hint = match self.cache.get(&key) {
+            Some(Ok(_)) => return None,
+            Some(Err(error)) => self.explain(error).hint,
+            None => match self.cache.get(&Key::Repository) {
+                Some(Err(error)) => self.explain(error).hint,
+                _ => return None,
+            },
+        };
+        let mut hints = vec![("R", "retry")];
+        if hint.contains("sign in") {
+            hints.push(("@", "sign in"));
+        } else if hint.contains('@') {
+            hints.push(("@", "accounts"));
+        }
+        if self.return_to.is_some() || self.notify.back {
+            hints.push(("Esc", "back"));
+        }
+        Some(hints)
     }
 
     /// The selected run as best known: its detail for the chosen attempt, else its row.
@@ -1801,22 +1853,19 @@ impl Workspace {
         if self.page != 3 {
             return;
         }
-        let runs = self.shown_runs();
-        if !runs.is_empty() {
-            let position = self
-                .run_id
-                .and_then(|id| runs.iter().position(|run| number(run, "databaseId") == id));
-            match position {
-                Some(at) => self.run_selected = at,
-                None if self.actions.pinned && self.run_id.is_some() => {}
-                None => {
-                    let at = self.run_selected.min(runs.len() - 1);
-                    let id = number(runs[at], "databaseId");
-                    self.run_selected = at;
-                    self.run_id = Some(id);
-                    self.attempt = 0;
-                    self.ensure(false);
-                }
+        if !self.actions.pinned {
+            let runs = self.shown_runs();
+            let selected = self.run_cursor(&runs);
+            let id = selected.map(|at| number(runs[at], "databaseId"));
+            self.run_selected = selected.unwrap_or(0);
+            if id != self.run_id {
+                self.run_id = id;
+                self.attempt = 0;
+            }
+            if id.is_none() {
+                self.actions.right = false;
+                self.actions.open = false;
+                self.actions.zoom = false;
             }
         }
         let identity = format!("{}/{}", self.run_id.unwrap_or(0), self.attempt);
@@ -1839,13 +1888,10 @@ impl Workspace {
 
     fn select_run(&mut self, delta: isize) {
         let runs = self.shown_runs();
-        if runs.is_empty() {
+        let Some(cursor) = self.run_cursor(&runs) else {
             return;
-        }
-        let at = self
-            .run_cursor(&runs)
-            .saturating_add_signed(delta)
-            .min(runs.len() - 1);
+        };
+        let at = cursor.saturating_add_signed(delta).min(runs.len() - 1);
         let id = number(runs[at], "databaseId");
         self.run_selected = at;
         self.actions.pinned = false;
@@ -2350,6 +2396,7 @@ impl Workspace {
         if self.typing(key) {
             return Some(Ok(None));
         }
+        self.sync_actions();
         // The shared key table (`keymap.rs`): `Space e` hides the left column. The filter
         // popup and the attempts list keep their own keys.
         if !self.actions.picker && !self.actions.attempts {
@@ -2382,7 +2429,7 @@ impl Workspace {
         if plain && !self.actions.attempts {
             match key.code {
                 KeyCode::Char(c @ '1'..='3') => {
-                    if c == '3' && self.run_id.is_none() {
+                    if c == '3' && self.run_target().is_none() {
                         return Some(Err(format!("Select a {} first", self.actions_noun())));
                     }
                     self.focus_panel(usize::from(c as u8 - b'1'));
@@ -2397,14 +2444,16 @@ impl Workspace {
                 _ => {}
             }
         }
-        let id = self.run_id;
+        let id = self.run_target();
         // Sheets and refresh work in both panels.
         if plain {
             let sheet = match key.code {
                 KeyCode::Char('r') => id.map(Action::Rerun),
                 KeyCode::Char('x') => id.map(Action::Cancel),
                 KeyCode::Char('A') => id.map(Action::Approve),
-                KeyCode::Char('d') => Some(Action::Dispatch(0)),
+                KeyCode::Char('d') if self.actions_failure_hints().is_none() => {
+                    Some(Action::Dispatch(0))
+                }
                 _ => None,
             };
             if matches!(sheet, Some(Action::Dispatch(_)))
@@ -2419,7 +2468,7 @@ impl Workspace {
                 return Some(self.activate(action));
             }
             if matches!(key.code, KeyCode::Char('r' | 'x' | 'A')) {
-                return Some(Err(format!("Select a {} first", self.actions_noun())));
+                return Some(Ok(None));
             }
             // `o`: the run on the forge's website, as `o` opens a pull request's page.
             if key.code == KeyCode::Char('o') && !self.actions.attempts {
@@ -2453,6 +2502,17 @@ impl Workspace {
                 self.choose_section(section);
                 return Some(Ok(None));
             }
+        }
+        use SpatialDirection::{Down, Left, Right, Up};
+        if !self.actions.attempts
+            && let Some(direction) = control_direction(key)
+            && matches!(
+                (self.panel(), direction),
+                (0 | 1, Left) | (0, Up) | (1, Down) | (2, Up | Down | Right)
+            )
+        {
+            self.focus_exit = Some(direction);
+            return Some(Ok(None));
         }
         if self.actions.right {
             Some(self.run_key(key, write_refusal))
@@ -2503,7 +2563,7 @@ impl Workspace {
     /// for its panels; the run needs one selected.
     pub(super) fn focus_panel(&mut self, panel: usize) {
         if panel >= 2 {
-            if self.run_id.is_some() {
+            if self.run_target().is_some() {
                 self.actions.workflows = false;
                 self.actions.right = true;
                 self.actions.open = true;
@@ -2567,8 +2627,7 @@ impl Workspace {
         };
         if key.modifiers.control {
             if matches!(key.code, KeyCode::Char('l')) {
-                self.actions.right = true;
-                self.actions.open = true;
+                self.focus_panel(2);
             }
             return Ok(None);
         }
@@ -2819,6 +2878,7 @@ impl Workspace {
         self.return_to = None;
         self.notify.back = false;
         self.actions.visual = None;
+        self.actions.pinned = false;
         self.actions.right = false;
         self.actions.workflows = false;
         self.actions.open = false;
@@ -2886,7 +2946,21 @@ impl Workspace {
                     self.actions.cancelling.insert(id);
                 }
             }
+            Write::Rerun { run, .. } => self.pin_rerun(run.0.parse::<u64>().ok()),
+            Write::RerunJob(_) => {
+                let run = self.actions.rerun_job_run.take();
+                self.pin_rerun(run);
+            }
             _ => {}
+        }
+    }
+
+    /// A re-run run may leave the list it was picked from (no longer failing); like a closed
+    /// issue in the reader, it stays shown there until the cursor moves. From the list itself
+    /// the cursor moves on with the list instead.
+    fn pin_rerun(&mut self, run: Option<u64>) {
+        if self.actions.right && run.is_some() && run == self.run_target() {
+            self.actions.pinned = true;
         }
     }
 
@@ -2913,7 +2987,7 @@ impl Workspace {
         if let Some(id) = self.actions.pending_rerun
             && self.ready_form.is_none()
         {
-            if self.run_id != Some(id) || self.page != 3 {
+            if self.page != 3 || self.run_target() != Some(id) {
                 self.actions.pending_rerun = None;
             } else if self.cache.contains_key(&Key::Run(id, self.attempt))
                 || self.cache.contains_key(&Key::Run(id, 0))
@@ -3265,7 +3339,7 @@ impl Workspace {
         if chosen != 0 {
             return Some(chosen);
         }
-        let run = self.run_value(self.run_id?)?;
+        let run = self.run_value(self.run_target()?)?;
         Some(number(run, "workflowDatabaseId")).filter(|id| *id != 0)
     }
 
@@ -3820,21 +3894,7 @@ fn paint_list(
     let list = Rect::new(inner.x, y, inner.w, inner.bottom().saturating_sub(y));
     let runs = ws.shown_runs();
     if runs.is_empty() {
-        let all = ws.runs().len();
-        let (text, role) = match ws.cache.get(&key) {
-            Some(Err(error)) => (calm(ws, error), GitRole::Removed),
-            None => match ws.blocked(&key) {
-                Some((headline, hint)) => (format!("{headline} · {hint}"), GitRole::Muted),
-                None => ("Loading…".into(), GitRole::Muted),
-            },
-            Some(Ok(_)) if all == 0 => (format!("No {noun}s yet"), GitRole::Muted),
-            Some(Ok(_)) => match section {
-                1 => ("Nothing is failing".into(), GitRole::Added),
-                2 => ("Nothing is running".into(), GitRole::Muted),
-                3 => (format!("None of these {noun}s are yours"), GitRole::Muted),
-                _ => (format!("No {noun}s match these filters"), GitRole::Muted),
-            },
-        };
+        let (text, role) = ws.empty_runs();
         frame
             .grid
             .put_text_clipped(list.x + 1, list.y, &text, st(role, PANE), list.right() - 1);
@@ -3877,7 +3937,7 @@ fn paint_list(
                 }
             })
             .collect::<Vec<_>>();
-        let cursor = ws.run_cursor(&runs);
+        let cursor = ws.run_cursor(&runs).unwrap_or(0);
         if let Some(row) = paint_items(&mut frame.grid, list, &items, Some(cursor), focused, mode)
             && focused
             && !ws.actions.filter.editing
@@ -3993,26 +4053,22 @@ fn paint_run(
     let right = inner.right().saturating_sub(1);
     let mut y = inner.y;
     let Some((id, run)) = ws
-        .run_id
+        .run_target()
         .and_then(|id| ws.run_value(id).map(|run| (id, run.clone())))
     else {
-        let (text, role) = match ws.cache.get(&Key::Runs(ws.workflow_id())) {
-            None => match ws.blocked(&Key::Runs(ws.workflow_id())) {
-                Some((headline, hint)) => (format!("{headline} · {hint}"), GitRole::Muted),
-                None => ("Loading…".to_owned(), GitRole::Muted),
-            },
-            Some(Err(error)) => (calm(ws, error), GitRole::Muted),
+        let noun = ws.actions_noun();
+        let (text, role) = if ws.run_target().is_some() {
+            ("Loading…".to_owned(), GitRole::Muted)
+        } else if let Some(Ok(_)) = ws.cache.get(&Key::Runs(ws.workflow_id()))
+            && ws.runs().is_empty()
+        {
             // Why `d` would refuse stays on screen here, not only in a toast that fades.
-            Some(Ok(_)) => match ws.dispatch_refusal() {
-                None => (
-                    format!("No {} to show · d starts one", ws.actions_noun()),
-                    GitRole::Muted,
-                ),
-                Some(reason) => (
-                    format!("No {} to show · {reason}", ws.actions_noun()),
-                    GitRole::Muted,
-                ),
-            },
+            match ws.dispatch_refusal() {
+                None => (format!("No {noun} to show · d starts one"), GitRole::Muted),
+                Some(reason) => (format!("No {noun} to show · {reason}"), GitRole::Muted),
+            }
+        } else {
+            ws.empty_runs()
         };
         frame
             .grid
@@ -4759,7 +4815,9 @@ fn footer(app: &GitScreen, frame: &mut Frame, rect: Rect) {
         .into_iter()
         .map(|(key, label)| (format!("{} {key}", keys.leader_name()), label))
         .collect::<Vec<_>>();
-    let hints: Vec<(&str, &str)> = if view.find.editing || view.filter.editing {
+    let hints: Vec<(&str, &str)> = if let Some(hints) = ws.actions_failure_hints() {
+        hints
+    } else if view.find.editing || view.filter.editing {
         vec![
             ("Enter", if view.find.editing { "find" } else { "filter" }),
             ("Esc", "cancel"),
@@ -4787,22 +4845,16 @@ fn footer(app: &GitScreen, frame: &mut Frame, rect: Rect) {
         hints
     } else if !view.right {
         // The run under the cursor still going: `x cancel`, not `r rerun`.
-        let running = ws
-            .run_id
-            .and_then(|id| ws.run_value(id))
-            .is_some_and(|run| !State::of(run).finished());
-        let rerun = if running {
-            ("x", "cancel")
-        } else {
-            ("r", "re-run")
-        };
-        let mut hints = vec![
-            ("Enter", "open"),
-            ("[ ]", "sections"),
-            ("/", "filter"),
-            ("F", "narrow"),
-            rerun,
-        ];
+        let run = ws.run_target().and_then(|id| ws.run_value(id));
+        let mut hints = vec![("[ ]", "sections"), ("/", "filter"), ("F", "narrow")];
+        if let Some(run) = run {
+            hints.insert(0, ("Enter", "open"));
+            hints.push(if State::of(run).finished() {
+                ("r", "re-run")
+            } else {
+                ("x", "cancel")
+            });
+        }
         // Opened from Notifications: the way back reads second, so a narrow row keeps it.
         if ws.notify.back {
             hints.insert(1, ("Esc", "back"));
@@ -4811,7 +4863,12 @@ fn footer(app: &GitScreen, frame: &mut Frame, rect: Rect) {
         if !sidebar.is_empty() {
             hints.push((sidebar.as_str(), "sidebar"));
         }
-        hints.extend([("d", "dispatch"), ("o", "browser")]);
+        if ws.dispatch_refusal().is_none() {
+            hints.push(("d", "dispatch"));
+        }
+        if run.is_some() {
+            hints.push(("o", "browser"));
+        }
         hints
     } else if view.visual.is_some() {
         vec![("j k", "extend"), ("y", "copy"), ("Esc", "cancel")]
@@ -5276,6 +5333,62 @@ mod tests {
         workspace
     }
 
+    fn actions_screen() -> (tempfile::TempDir, GitScreen) {
+        let root = tempfile::tempdir().unwrap();
+        git2::Repository::init(root.path()).unwrap();
+        let mut app = GitScreen::open(root.path()).unwrap();
+        app.page = 3;
+        app.github = workspace();
+        app.github.root = root.path().into();
+        (root, app)
+    }
+
+    #[test]
+    fn zero_run_filter_has_no_preview_or_rerun_target() {
+        let (_root, mut app) = actions_screen();
+        let before = frame(&mut app, 120, 30);
+        assert!(before.grid.row_text(3).contains("Run #10"));
+        for key in "/zzz-no-run"
+            .chars()
+            .map(KeyEvent::character)
+            .chain([KeyEvent::plain(KeyCode::Enter), KeyEvent::character('r')])
+        {
+            assert!(app.github.event(&key, None).unwrap().is_none());
+        }
+        assert_eq!(app.github.run_target(), None);
+        let after = frame(&mut app, 120, 30);
+        assert!(
+            after
+                .grid
+                .row_text(2)
+                .contains("No runs match these filters")
+        );
+        assert!(!after.grid.row_text(29).contains("re-run"));
+    }
+
+    #[test]
+    fn actions_load_failure_footer_only_offers_recovery() {
+        let (_root, mut app) = actions_screen();
+        app.github.cache.insert(
+            Key::Runs(0),
+            Err("Network error · error sending request".into()),
+        );
+        let shown = frame(&mut app, 150, 30);
+        let footer = shown.grid.row_text(29);
+        assert!(footer.contains("R retry"), "{footer}");
+        for hint in [
+            "Enter open",
+            "sections",
+            "filter",
+            "narrow",
+            "re-run",
+            "dispatch",
+            "browser",
+        ] {
+            assert!(!footer.contains(hint), "{footer}");
+        }
+    }
+
     /// A run sheet names the run as the header does, says what it does, and a destructive one
     /// starts on its safe button; GitLab's say pipeline.
     /// R9-05: a run opened from a pull request's check goes back to it on Esc, to the same
@@ -5288,6 +5401,7 @@ mod tests {
         };
         let mut workspace = workspace();
         workspace.page = 2;
+        workspace.focus = 2;
         workspace.opened = Some((2, 18));
         workspace.pr_tab = super::super::pr::CHECKS;
         workspace.detail_cursor = 4;
@@ -5349,6 +5463,55 @@ mod tests {
         assert_eq!(keys(100), "Enter f z n a r / Esc");
         assert_eq!(keys(120), "Enter f z n a r / w Esc");
         assert_eq!(keys(60), "Enter f n Esc");
+    }
+
+    #[test]
+    fn a_rerun_run_stays_shown_in_the_reader_after_it_leaves_the_failing_list() {
+        let rerun = Write::Rerun {
+            run: 501.into(),
+            scope: crate::forge::request::RerunScope::All,
+            debug: false,
+        };
+        let start = |reading: bool| {
+            let mut workspace = workspace();
+            workspace.choose_section(1);
+            if reading {
+                workspace.focus_panel(2);
+            }
+            assert_eq!(workspace.run_target(), Some(501));
+            workspace
+        };
+        let leave_failing = |workspace: &mut Workspace| {
+            if let Some(Ok(reply)) = workspace.cache.get_mut(&Key::Runs(0)) {
+                reply.value[0]["status"] = "in_progress".into();
+                reply.value[0]["conclusion"] = Value::Null;
+            }
+            workspace.sync_actions();
+            assert!(workspace.shown_runs().is_empty());
+        };
+
+        // Re-run from the reader: the run stays open there until the cursor moves.
+        let mut workspace = start(true);
+        workspace.written(&rerun, Ok(Default::default()), true);
+        leave_failing(&mut workspace);
+        assert_eq!(workspace.run_target(), Some(501));
+        workspace.choose_section(1);
+        assert_eq!(workspace.run_target(), None);
+
+        // Re-run from the list: the cursor moves on with the list.
+        let mut workspace = start(false);
+        workspace.written(&rerun, Ok(Default::default()), true);
+        leave_failing(&mut workspace);
+        assert_eq!(workspace.run_target(), None);
+
+        // One job's reply names only the job: it pins the run it was sent for, not another.
+        let mut workspace = start(true);
+        workspace.actions.rerun_job_run = Some(502);
+        workspace.written(&Write::RerunJob(7.into()), Ok(Default::default()), true);
+        assert!(!workspace.actions.pinned);
+        workspace.actions.rerun_job_run = Some(501);
+        workspace.written(&Write::RerunJob(7.into()), Ok(Default::default()), true);
+        assert!(workspace.actions.pinned);
     }
 
     #[test]

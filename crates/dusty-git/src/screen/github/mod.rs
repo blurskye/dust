@@ -184,8 +184,8 @@ pub(super) struct Workspace {
     opened: Option<(usize, u64)>,
     /// Where Esc goes from a run opened off a pull request's check.
     pub(super) return_to: Option<ReturnTarget>,
-    /// While a filter is typed, the first match: the reader follows it.
-    live_pick: Option<u64>,
+    /// The highlighted row of the live filter, if it has any matches.
+    live_pick: Option<Value>,
     detail_scroll: usize,
     horizontal: usize,
     queries: [String; 2],
@@ -428,7 +428,11 @@ impl Workspace {
         self.notice.clear();
         self.notice_error = false;
         self.page = target.page;
-        self.opened = target.opened.or(Some((target.page, target.number)));
+        self.opened = if target.focus == 2 {
+            target.opened.or(Some((target.page, target.number)))
+        } else {
+            None
+        };
         self.selected = target.selected;
         self.focus = target.focus;
         self.last_list = target.last_list;
@@ -757,22 +761,37 @@ impl Workspace {
     pub fn current_page(&self) -> usize {
         self.page
     }
+    fn live_filter(&self) -> bool {
+        self.fresh
+            .live
+            .as_ref()
+            .is_some_and(|live| live.page == self.page)
+    }
+    fn list_row(&self) -> Option<&Value> {
+        if !matches!(self.page, 1 | 2) {
+            return None;
+        }
+        if self.live_filter() {
+            return self.live_pick.as_ref();
+        }
+        let rows = self.value(&self.list_key())?.as_array()?;
+        rows.get(visible_index(rows.len(), self.selected[self.page - 1])?)
+    }
+    fn opened_number(&self) -> Option<u64> {
+        self.opened
+            .filter(|(page, _)| *page == self.page && !self.live_filter())
+            .map(|(_, number)| number)
+    }
     fn number(&self) -> u64 {
-        if let Some(number) = self.live_pick.filter(|_| matches!(self.page, 1 | 2)) {
-            return number;
-        }
-        if let Some((page, number)) = self.opened
-            && page == self.page
-        {
-            return number;
-        }
-        self.items()
-            .get(self.selected[self.page.saturating_sub(1).min(1)])
-            .map(|value| number(value, "number"))
+        self.opened_number()
+            .or_else(|| self.list_row().map(|row| number(row, "number")))
             .unwrap_or(0)
     }
     fn item(&self) -> Option<&Value> {
-        self.value(&Key::Item(self.page, self.number()))
+        match self.number() {
+            0 => None,
+            id => self.value(&Key::Item(self.page, id)),
+        }
     }
     // A list description is readable prose, not loaded metadata. Keep it in the
     // current query/state/page cache, scoped to this workspace's host/repository.
@@ -780,16 +799,18 @@ impl Workspace {
         if !matches!(self.page, 1 | 2) {
             return None;
         }
-        let id = self.number();
-        self.value(&self.list_key())?
-            .as_array()?
-            .iter()
-            .find(|item| {
-                number(item, "number") == id
-                    && (!self.inbox.enabled
-                        || inbox::Target::from_row(item, &self.host, self.page)
-                            .is_ok_and(|target| target.repo == self.repo))
-            })
+        let row = if let Some(id) = self.opened_number() {
+            self.value(&self.list_key())?
+                .as_array()?
+                .iter()
+                .find(|row| number(row, "number") == id)?
+        } else {
+            self.list_row()?
+        };
+        (!self.inbox.enabled
+            || inbox::Target::from_row(row, &self.host, self.page)
+                .is_ok_and(|target| target.repo == self.repo))
+        .then_some(row)
     }
     fn file_viewed(&self, id: u64, path: &str) -> Option<bool> {
         let value = self.value(&Key::Viewed(id))?;
@@ -1147,8 +1168,10 @@ impl Workspace {
                 ForgeReply::Written(write, result) => {
                     changed = true;
                     self.accounts.observe(&self.host, result.as_ref().err());
-                    if let (Op::Write(target, _), Ok(receipt)) = (&request.op, &result)
-                        && *target == self.target()
+                    let same_target =
+                        matches!(&request.op, Op::Write(target, _) if *target == self.target());
+                    if let Ok(receipt) = &result
+                        && same_target
                     {
                         for read in &receipt.invalidates {
                             if let Read::Timeline { kind, number } = read {
@@ -1162,7 +1185,11 @@ impl Workspace {
                             }
                         }
                     }
-                    self.written(&write, result.map_err(|error| error.to_string()));
+                    self.written(
+                        &write,
+                        result.map_err(|error| error.to_string()),
+                        same_target,
+                    );
                     self.ensure(refresh);
                 }
                 ForgeReply::Fetched(_, result) => {
@@ -1237,7 +1264,12 @@ impl Workspace {
         changed
     }
     /// A confirmed write finished: notice, draft and queue bookkeeping.
-    fn written(&mut self, write: &Write, result: Result<crate::forge::request::Receipt, String>) {
+    fn written(
+        &mut self,
+        write: &Write,
+        result: Result<crate::forge::request::Receipt, String>,
+        same_target: bool,
+    ) {
         match result {
             Ok(receipt) => {
                 self.actions_written(write, &receipt.summary);
@@ -1262,6 +1294,23 @@ impl Workspace {
                         // Nothing was saved on the forge: the run header says it (the
                         // receipt, `Cancellation requested`).
                         String::new()
+                    } else if let Write::SetState {
+                        kind, number, open, ..
+                    } = write
+                    {
+                        let page = if *kind == ItemKind::Issue { 1 } else { 2 };
+                        if same_target {
+                            if self.page == page && self.focus == 2 && self.number() == *number {
+                                // The next list read may remove this row, but not the open reader.
+                                self.opened = Some((page, *number));
+                            }
+                            if let Some(Ok(reply)) = self.cache.get_mut(&Key::Item(page, *number)) {
+                                reply.value["state"] = if *open { "OPEN" } else { "CLOSED" }.into();
+                                reply.text = reply.value.to_string();
+                            }
+                        }
+                        let verb = if *open { "Reopened" } else { "Closed" };
+                        format!("{verb} {}{number}", self.sigil(page == 2))
                     } else if let Write::SubmitReview { number, drafts, .. } = write
                         && !drafts.is_empty()
                     {
@@ -1425,6 +1474,23 @@ impl Workspace {
         key: &KeyEvent,
         write_refusal: Option<&str>,
     ) -> Result<Option<Form>, String> {
+        let page = self.page;
+        let was_reading = self.focus == 2;
+        let result = self.handle_key(key, write_refusal);
+        if was_reading && self.page == page && self.focus != 2 && self.opened.is_some() {
+            self.return_inbox_list();
+            self.opened = None;
+            self.detail_rows.clear();
+            self.ensure(false);
+        }
+        result
+    }
+
+    fn handle_key(
+        &mut self,
+        key: &KeyEvent,
+        write_refusal: Option<&str>,
+    ) -> Result<Option<Form>, String> {
         self.fresh.disk_until = None;
         if std::mem::take(&mut self.notice_transient) {
             self.notice.clear();
@@ -1519,21 +1585,36 @@ impl Workspace {
             // Moving leaves the find match: its highlight and caret.
             self.detail_find.leave_match();
         }
+        if matches!(self.page, 1 | 2)
+            && self.number() == 0
+            && !key.modifiers.control
+            && (matches!(
+                key.code,
+                KeyCode::Char('C' | 'c' | 'e' | 'o' | 'x' | 'X' | 'l' | 'a' | 'm' | 'M')
+            ) || self.page == 2
+                && (matches!(key.code, KeyCode::Char('r' | 'w' | 'd' | 'f'))
+                    || self.focus == 2 && key.code == KeyCode::Char('v')))
+        {
+            return Ok(None);
+        }
         if let Some(result) = self.conversation_key(key) {
             return result;
         }
         if key.modifiers.control {
             match key.code {
-                KeyCode::Char('h') => {
+                KeyCode::Char('h' | 'H') if self.focus == 2 && !key.modifiers.alt => {
                     self.focus = self.last_list;
                     self.return_inbox_list();
                 }
-                KeyCode::Char('l') => self.focus = 2,
+                KeyCode::Char('l' | 'L') if self.focus < 2 && !key.modifiers.alt => {
+                    self.focus = 2;
+                }
                 KeyCode::Char('n') if !key.modifiers.alt && matches!(self.page, 1 | 2) => {
                     self.load_more();
                 }
-                KeyCode::Char('j') if self.page == 3 && self.focus < 2 => self.focus = 1,
-                KeyCode::Char('k') if self.page == 3 && self.focus < 2 => self.focus = 0,
+                _ if matches!(self.page, 1 | 2) => {
+                    self.focus_exit = control_direction(key);
+                }
                 _ => {}
             }
         } else {
@@ -1732,6 +1813,9 @@ impl Workspace {
                             return self.activate(action);
                         }
                     } else {
+                        if matches!(self.page, 1 | 2) && self.list_row().is_none() {
+                            return Ok(None);
+                        }
                         if self.page == 3 && self.focus == 1 {
                             self.run_id = self
                                 .runs()
@@ -1776,6 +1860,11 @@ pub(in crate::screen) fn frame(
 fn string<'a>(value: &'a Value, key: &str) -> &'a str {
     value[key].as_str().unwrap_or("")
 }
+/// Clamp a cursor to the visible list, without inventing a row when it is empty.
+fn visible_index(len: usize, index: usize) -> Option<usize> {
+    Some(index.min(len.checked_sub(1)?))
+}
+
 fn number(value: &Value, key: &str) -> u64 {
     value[key].as_u64().unwrap_or(0)
 }
@@ -1793,6 +1882,7 @@ fn login(value: &Value) -> &str {
 #[cfg(test)]
 mod list_tests {
     use super::*;
+    use crate::screen::GitScreen;
 
     fn cached_workspace() -> Workspace {
         let mut workspace = Workspace::new(PathBuf::new());
@@ -1820,6 +1910,134 @@ mod list_tests {
         );
         workspace.list_limits.insert(key, 100);
         workspace
+    }
+
+    fn press(app: &mut GitScreen, key: KeyEvent) {
+        app.event(crate::ui::UiEvent::Key {
+            key,
+            kind: crate::ui::KeyInputKind::Press,
+        });
+    }
+
+    fn item_screen(page: usize) -> (tempfile::TempDir, GitScreen) {
+        let root = tempfile::tempdir().unwrap();
+        git2::Repository::init(root.path()).unwrap();
+        let mut app = GitScreen::open(root.path()).unwrap();
+        app.page = page;
+        app.github = cached_workspace();
+        app.github.root = root.path().into();
+        app.github.active = lanes::Lanes::dry();
+        app.github.fresh = fresh::Fresh::with(Some(std::sync::Arc::new(
+            crate::forge::cache::Cache::at(root.path().join("forge-cache")),
+        )));
+        app.github.page = page;
+        let item =
+            |number, title| serde_json::json!({"number": number, "title": title, "state": "OPEN"});
+        let first = item(16, "Issue being read");
+        let second = item(14, "Unrelated issue");
+        for (key, value) in [
+            (app.github.list_key(), serde_json::json!([first, second])),
+            (Key::Item(page, 16), first),
+            (Key::Item(page, 14), second),
+        ] {
+            app.github.cache.insert(
+                key,
+                Ok(Reply {
+                    text: value.to_string(),
+                    value,
+                }),
+            );
+        }
+        (root, app)
+    }
+
+    #[test]
+    fn zero_issue_or_pr_filter_replaces_the_previous_preview() {
+        for (page, empty) in [
+            (1, "No issues match this filter"),
+            (2, "No pull requests match this filter"),
+        ] {
+            let (_root, mut app) = item_screen(page);
+            assert!(
+                app.frame(120, 30)
+                    .grid
+                    .row_text(2)
+                    .contains("Issue being read")
+            );
+            press(&mut app, KeyEvent::character('/'));
+            app.event(crate::ui::UiEvent::Paste("zzz-no-match".into()));
+            let editing = app.frame(120, 30);
+            assert!(editing.grid.row_text(2).contains(empty));
+            assert_eq!(app.github.number(), 0);
+            let mut apply = KeyEvent::plain(KeyCode::Enter);
+            apply.modifiers.control = true;
+            press(&mut app, apply);
+            assert!(app.form.is_none(), "{}", app.notice);
+            // The forge's answer to the applied query.
+            app.github.cache.insert(
+                app.github.list_key(),
+                Ok(Reply {
+                    text: "[]".into(),
+                    value: serde_json::json!([]),
+                }),
+            );
+            let applied = app.frame(120, 30);
+            assert!(applied.grid.row_text(2).contains(empty));
+            assert_eq!(app.github.number(), 0);
+            assert!(!applied.grid.row_text(29).contains("Enter open"));
+            press(&mut app, KeyEvent::character('x'));
+            assert!(app.form.is_none() && app.notice.is_empty());
+        }
+    }
+
+    #[test]
+    fn confirmed_close_keeps_the_reader_on_the_closed_issue() {
+        let (_root, mut app) = item_screen(1);
+        app.github.host = "gitlab.com".into();
+        press(&mut app, KeyEvent::plain(KeyCode::Enter));
+        press(&mut app, KeyEvent::character('x'));
+        assert!(matches!(
+            app.form.as_ref().map(|form| &form.action),
+            Some(FormAction::Github(Action::State(1, 16, true)))
+        ));
+        let mut confirm = KeyEvent::plain(KeyCode::Enter);
+        confirm.modifiers.control = true;
+        press(&mut app, confirm);
+        // The forge answers: the request leaves the queue, then its receipt arrives.
+        let at = app
+            .github
+            .queue
+            .iter()
+            .position(|request| matches!(&request.op, Op::Write(_, Write::SetState { .. })))
+            .expect("confirmed close");
+        let Some(Request {
+            op: Op::Write(_, write),
+            ..
+        }) = app.github.queue.remove(at)
+        else {
+            unreachable!()
+        };
+        app.github.written(&write, Ok(Default::default()), true);
+        // The refreshed Open list only contains the other issue.
+        let value = serde_json::json!([app.github.value(&Key::Item(1, 14)).unwrap()]);
+        app.github.cache.insert(
+            app.github.list_key(),
+            Ok(Reply {
+                text: value.to_string(),
+                value,
+            }),
+        );
+        let closed = app.frame(120, 30);
+        assert!(closed.grid.row_text(2).contains("#16 Issue being read"));
+        assert!(closed.grid.row_text(3).contains("Closed"));
+        assert!(closed.grid.row_text(29).contains("Closed #16"));
+        press(&mut app, KeyEvent::plain(KeyCode::Escape));
+        assert!(
+            app.frame(120, 30)
+                .grid
+                .row_text(2)
+                .contains("#14 Unrelated issue")
+        );
     }
 
     #[test]
@@ -1879,7 +2097,8 @@ mod list_tests {
                 expected == pr::FILES || expected == pr::CHECKS
             );
             assert_eq!(keyboard.drafts, action.drafts);
-            assert_eq!(keyboard.opened, Some((2, 3)));
+            assert_eq!(keyboard.opened, action.opened);
+            assert_eq!(keyboard.number(), action.number());
             assert_eq!(
                 keyboard
                     .queue
@@ -1902,22 +2121,19 @@ mod list_tests {
                     .value,
                 before
             );
-            assert!(
-                keyboard
-                    .event(
-                        &KeyEvent {
-                            code: KeyCode::Char('h'),
-                            modifiers: crate::editor::input::Modifiers {
-                                control: true,
-                                ..Default::default()
-                            }
-                        },
-                        None
-                    )
-                    .unwrap()
-                    .is_none()
-            );
-            assert_eq!(keyboard.focus, 0);
+            // Back in the list, the reader follows the highlighted row again.
+            let back = KeyEvent {
+                code: KeyCode::Char('h'),
+                modifiers: crate::editor::input::Modifiers {
+                    control: true,
+                    ..Default::default()
+                },
+            };
+            for workspace in [&mut keyboard, &mut action] {
+                assert!(workspace.event(&back, None).unwrap().is_none());
+                assert_eq!(workspace.focus, 0);
+                assert_eq!(workspace.opened, None);
+            }
             assert_eq!(keyboard.pr_tab, expected);
         }
     }
