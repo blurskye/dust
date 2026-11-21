@@ -1848,6 +1848,121 @@ pub(in crate::app) fn the_settings_page_searches_edits_and_closes_layer_by_layer
 }
 
 #[test]
+fn startup_keeps_the_valid_file_when_the_other_file_cannot_be_parsed() {
+    // Isolate the real user-config paths without changing the parent test process.
+    if std::env::var_os("DUSTY_TEST_KEYMAP_FALLBACK").is_none() {
+        let root = tempdir().unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                concat!(
+                    "app::configuration::tests::",
+                    "startup_keeps_the_valid_file_when_the_other_file_cannot_be_parsed"
+                ),
+            ])
+            .env("DUSTY_TEST_KEYMAP_FALLBACK", "1")
+            .env("DUSTY_CONFIG_HOME", root.path())
+            .env("DUSTY_STATE_HOME", root.path().join("state"))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success()
+                && String::from_utf8_lossy(&output.stdout).contains("test result: ok. 1 passed;"),
+            "{output:?}"
+        );
+        return;
+    }
+
+    let settings_path = crate::config::user_config_path();
+    let keymaps_path = crate::config::user_keymaps_path();
+    let start = || {
+        let loaded = crate::config::load_user_config();
+        let error = crate::app::validate_loaded_configuration(loaded.clone()).unwrap_err();
+        let app = App::new(
+            StartupTarget::Dashboard {
+                root: settings_path.parent().unwrap().into(),
+            },
+            loaded,
+            false,
+            crate::config::user_state_directory(),
+            false,
+            false,
+            Arc::new(crate::clock::SystemClock),
+        )
+        .unwrap();
+        (app, error)
+    };
+
+    fs::write(
+        &settings_path,
+        "[editor]\nwrap = true\n[ui]\ntheme = 'catppuccin-latte'\n[lsp]\nenabled = false\n",
+    )
+    .unwrap();
+    fs::write(&keymaps_path, "[[keymap\n").unwrap();
+    let (app, error) = start();
+    assert!(app.configuration.settings().editor.wrap);
+    assert!(!app.configuration.settings().lsp.enabled);
+    assert_eq!(app.configuration.theme().name, "catppuccin-latte");
+    assert_eq!(
+        documented_key_reaches(app.configuration.keymaps(), "<leader> e")
+            .unwrap()
+            .id
+            .as_str(),
+        "explorer.panel.toggle"
+    );
+    assert_eq!(app.ui.config_diagnostic.as_deref(), Some(error.as_str()));
+    assert_eq!(
+        error.matches(&keymaps_path.display().to_string()).count(),
+        1
+    );
+    assert!(error.contains("line 1"), "{error}");
+    drop(app);
+
+    fs::write(&settings_path, "[editor\n").unwrap();
+    fs::write(
+        &keymaps_path,
+        "[[keymap]]\nid = 'builtin.global.explorer'\ndisable = true\n",
+    )
+    .unwrap();
+    let (app, error) = start();
+    assert!(documented_key_reaches(app.configuration.keymaps(), "<leader> e").is_none());
+    assert_eq!(app.ui.config_diagnostic.as_deref(), Some(error.as_str()));
+    assert!(
+        error.contains(&settings_path.display().to_string()),
+        "{error}"
+    );
+    drop(app);
+
+    // A keymap that parses but names a command Dusty doesn't have costs only the keys.
+    fs::write(
+        &settings_path,
+        "[editor]\nwrap = true\n[lsp]\nenabled = false\n",
+    )
+    .unwrap();
+    fs::write(
+        &keymaps_path,
+        "[[keymap]]\nid = 'user.mine'\ncontext = 'editor'\nmode = 'normal'\nkeys = 'Q'\ncommand = 'no.such.command'\n",
+    )
+    .unwrap();
+    let (app, error) = start();
+    assert!(app.configuration.settings().editor.wrap);
+    assert!(!app.configuration.settings().lsp.enabled);
+    assert_eq!(
+        documented_key_reaches(app.configuration.keymaps(), "<leader> e")
+            .unwrap()
+            .id
+            .as_str(),
+        "explorer.panel.toggle"
+    );
+    let shown = app.ui.config_diagnostic.as_deref().unwrap();
+    assert!(
+        shown.contains("couldn't be used, so the default keys are on"),
+        "{shown}"
+    );
+    assert!(shown.contains("no.such.command"), "{shown} / {error}");
+}
+
+#[test]
 pub(in crate::app) fn the_settings_page_saves_and_reloads_user_configuration() {
     use crate::app::commands::SettingsAction;
     use crate::ui::SettingsValue;

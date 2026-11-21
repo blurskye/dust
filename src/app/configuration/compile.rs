@@ -59,7 +59,7 @@ pub(crate) fn compile_keymaps(
             ) {
                 Ok(mut bundled) => {
                     let message = format!(
-                        "invalid {}; keeping bundled keymaps: {}",
+                        "{} couldn't be used, so the default keys are on: {}",
                         loaded.path.display(),
                         diagnostics.join("; ")
                     );

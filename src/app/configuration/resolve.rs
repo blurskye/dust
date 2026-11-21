@@ -131,7 +131,7 @@ pub(in crate::app) fn base_safe_keymaps(
 pub(in crate::app) fn resolve_configuration(
     commands: &CommandRegistry<AppEffect>,
     mut loaded: LoadedConfig,
-    strict: bool,
+    strict_sources: bool,
 ) -> Result<(ResolvedConfiguration, Option<String>), String> {
     if loaded.user_configuration {
         loaded.installed_plugins = crate::tools::installed_plugins(
@@ -143,15 +143,18 @@ pub(in crate::app) fn resolve_configuration(
     diagnostics.extend(loaded.keymaps.diagnostic.iter().cloned());
     if let Err(error) = validate_configured_commands(commands, &loaded) {
         diagnostics.push(error);
+        return Err(diagnostics.join("; "));
     }
-    if strict && !diagnostics.is_empty() {
+    // The loader has already replaced unreadable or malformed sources independently.
+    // Startup can use those replacements; config checks and reloads reject the errors.
+    if strict_sources && !diagnostics.is_empty() {
         return Err(diagnostics.join("; "));
     }
     let (base_keymaps, expected_plugin_indexes, mut deferred_plugin_keymaps) =
         base_safe_keymaps(&loaded);
-    let (keymaps, keymap_diagnostic) = if strict {
+    let keymaps = if strict_sources {
         let (entries, bundled_count, groups, bundled_group_count) = keymap_entries(&base_keymaps);
-        match compile_keymap_entries(
+        compile_keymap_entries(
             commands,
             KeymapCompilation {
                 entries,
@@ -163,14 +166,15 @@ pub(in crate::app) fn resolve_configuration(
                 user_group_spans: &base_keymaps.user_group_spans,
                 policy: &loaded.config.input.keymaps,
             },
-        ) {
-            Ok(compiled) => (compiled, None),
-            Err(errors) => return Err(errors.join("; ")),
-        }
+        )
+        .map_err(|errors| errors.join("; "))?
     } else {
-        compile_keymaps(commands, &base_keymaps, &loaded.config.input.keymaps)
+        // A user keymap that won't compile costs only the user's keys.
+        let (keymaps, diagnostic) =
+            compile_keymaps(commands, &base_keymaps, &loaded.config.input.keymaps);
+        diagnostics.extend(diagnostic);
+        keymaps
     };
-    diagnostics.extend(keymap_diagnostic);
     let mut settings = loaded.config;
     let raw_windows = settings.windows.clone();
     if let Some(rule) = settings.windows.rules.iter().find(|rule| {

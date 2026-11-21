@@ -361,7 +361,7 @@ impl App {
         let source_fingerprint = loaded_config.source_fingerprint.clone();
         let config_warning = loaded_config.warning.clone();
         let (configuration, config_diagnostic) =
-            match resolve_configuration(&commands, loaded_config, true) {
+            match resolve_configuration(&commands, loaded_config, false) {
                 Ok(resolved) => resolved,
                 Err(diagnostic) => {
                     let bundled = crate::config::load_bundled_config();
