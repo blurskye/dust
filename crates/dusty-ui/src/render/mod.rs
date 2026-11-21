@@ -1132,6 +1132,7 @@ pub struct TerminalPanelState {
     pub truncated: bool,
     pub focused: bool,
     pub input_hint: Option<String>,
+    pub exit_notice: Option<String>,
     pub columns: u16,
     pub rows: u16,
     pub cells: Vec<Vec<crate::pty_screen::PtyCell>>,

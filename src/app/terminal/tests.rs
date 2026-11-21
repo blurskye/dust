@@ -824,7 +824,7 @@ fn terminal_panel_focus_cycle_resize_and_close_preserve_independent_sessions() {
             .is_some_and(|value| !value.text.is_empty())
     );
     app.handle_configured_key("i".parse::<KeyEvent>().expect("terminal input"));
-    assert_eq!(app.active_input_context(), "terminal");
+    assert_eq!(app.active_input_context(), "terminal_normal");
     app.process_effect(crate::app::commands::AppEffect::TerminalCycle(-1));
     assert_eq!(app.terminal_session.selected(), Some(PtyId(1)));
     assert!(app.terminal_session.fixture_lines(PtyId(2))[0].contains("second"));
@@ -2339,19 +2339,10 @@ fn successful_terminal_exit_keeps_output_unless_profile_closes_on_exit() {
                     .iter()
                     .any(|line| line.contains("finished-output"))
             );
-            // A finished terminal reads like a pager: q closes it, and any other key goes
-            // back to the editor with the output left to read.
             driver.focus_only_terminal();
             assert_eq!(driver.context(), "terminal", "{profile}");
-            if profile == "completed" {
-                driver.key("q");
-                assert!(driver.projection().terminal_panel.is_none(), "{profile}");
-            } else {
-                driver.key(":");
-                assert_eq!(driver.keyboard_terminal(), None, "{profile}");
-                assert_eq!(driver.context(), "command_prompt", "{profile}");
-                assert!(driver.projection().terminal_panel.is_some(), "{profile}");
-            }
+            driver.key("enter");
+            assert!(driver.projection().terminal_panel.is_none(), "{profile}");
         }
     }
 }
@@ -2394,6 +2385,60 @@ fn oversized_terminal_paste_reports_its_rejection() {
         Some("terminal paste exceeds the input limit")
     );
     driver.terminal_close();
+}
+
+#[test]
+fn typing_after_terminal_exit_keeps_the_editor_unchanged() {
+    use crate::app::tests::driver::TestSession;
+
+    let mut driver = TestSession::new(crate::config::load_bundled_config());
+    let app = driver.application_mut();
+    let (buffer, _) = app
+        .state
+        .open_text(TextBuffer::from_text("editor"), None)
+        .unwrap();
+    app.set_dashboard_visibility(false);
+    let id = PtyId(1);
+    app.terminal_session.fixture(
+        id,
+        TerminalFixture {
+            profile: "shell".into(),
+            screen: PtyScreen::new(80, 8, 100),
+            running: false,
+            exit_code: Some(7),
+            truncated: false,
+        },
+        app.workspace.version(),
+    );
+    app.terminal_session.select(id);
+    app.set_terminal_focus(true);
+    app.sync_terminal_panel();
+    assert_eq!(driver.context(), "terminal");
+
+    driver.key("x");
+    let app = driver.application();
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "editor");
+    assert!(!app.state.buffers[buffer].dirty);
+    assert_eq!(driver.keyboard_terminal(), Some(id.0));
+    assert!(app.terminal_session.contains(id));
+
+    driver.key("escape");
+    driver.key("escape");
+    assert_eq!(driver.context(), "terminal_normal");
+    for key in ["i", "a"] {
+        driver.key(key);
+        assert_eq!(driver.context(), "terminal_normal");
+    }
+    let frame = driver.frame();
+    assert!((0..frame.grid.height()).any(|row| {
+        frame
+            .grid
+            .row_text(row)
+            .contains("Process exited with code 7 · q or Enter closes")
+    }));
+
+    driver.key("q");
+    assert!(!driver.application().terminal_session.contains(id));
 }
 
 #[test]

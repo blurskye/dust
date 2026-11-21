@@ -159,11 +159,17 @@ fn terminal_tab_start(terminal: &TerminalPanelState, config: &Config, width: u16
     first
 }
 
+fn terminal_header_hint(terminal: &TerminalPanelState) -> Option<&str> {
+    terminal.exit_notice.as_deref().or_else(|| {
+        terminal
+            .input_hint
+            .as_deref()
+            .filter(|_| terminal.focused && terminal.mode == TerminalPanelMode::Input)
+    })
+}
+
 fn terminal_title_width(terminal: &TerminalPanelState, config: &Config, width: u16) -> u16 {
-    let hint = terminal
-        .input_hint
-        .as_deref()
-        .filter(|_| terminal.focused && terminal.mode == TerminalPanelMode::Input);
+    let hint = terminal_header_hint(terminal);
     let mode = match terminal.mode {
         TerminalPanelMode::Input => None,
         TerminalPanelMode::Normal => Some(TERMINAL_NORMAL_LABEL),
@@ -182,6 +188,9 @@ fn terminal_title_width(terminal: &TerminalPanelState, config: &Config, width: u
         .saturating_add(2);
     if width > reserved.saturating_add(8) {
         width - reserved
+    } else if terminal.exit_notice.is_some() {
+        // In a narrow pane, show the close instruction before the tabs and mode label.
+        0
     } else {
         width
     }
@@ -293,6 +302,9 @@ pub(super) fn dock_terminal_panel(
     let mut title_x = geometry.x.saturating_add(1);
     let first = terminal_tab_start(terminal, config, title_width);
     for (index, tab) in terminal.tabs.iter().skip(first).enumerate() {
+        if title_x >= title_right {
+            break;
+        }
         if index > 0 {
             title_x = grid.put_text_clipped(
                 title_x,
@@ -318,20 +330,28 @@ pub(super) fn dock_terminal_panel(
     // The status line names the mode; only the other modes are repeated at the end of the tab
     // row, unless the terminal covers the status line, as fullscreen does.
     let mode = match terminal.mode {
-        TerminalPanelMode::Input => (bottom >= height).then_some("TERMINAL"),
+        TerminalPanelMode::Input => {
+            (bottom >= height && terminal.exit_notice.is_none()).then_some("TERMINAL")
+        }
         TerminalPanelMode::Normal => Some(TERMINAL_NORMAL_LABEL),
         TerminalPanelMode::Visual => Some(TERMINAL_VISUAL_LABEL),
     };
-    let hint = terminal
-        .input_hint
-        .as_deref()
-        .filter(|_| terminal.focused && terminal.mode == TerminalPanelMode::Input);
-    let notice = [hint, mode, terminal.truncated.then_some("output truncated")]
+    let notice = if title_width == 0 {
+        terminal.exit_notice.clone().unwrap_or_default()
+    } else {
+        [
+            terminal_header_hint(terminal),
+            mode,
+            terminal.truncated.then_some("output truncated"),
+        ]
         .into_iter()
         .flatten()
         .map(|text| format!(" {text} "))
-        .collect::<String>();
-    if !notice.is_empty() {
+        .collect::<String>()
+    };
+    if title_width == 0 {
+        grid.put_text_clipped(title_x, geometry.top, &notice, Style::TerminalTitle, right);
+    } else if !notice.is_empty() {
         let notice_width =
             u16::try_from(text_width(&notice, config.editor.ambiguous_width)).unwrap_or(u16::MAX);
         let notice_x = right.saturating_sub(notice_width.saturating_add(1));

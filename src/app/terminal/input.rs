@@ -93,6 +93,9 @@ impl Terminals {
     }
 
     pub(in crate::app) fn enter_terminal_input_mode(&mut self, id: PtyId) {
+        if self.ended(id) {
+            return;
+        }
         let Some(terminal) = self.tabs.get_mut(&id) else {
             return;
         };
@@ -296,6 +299,13 @@ impl Terminals {
             truncated: terminal.truncated,
             focused,
             input_hint: None,
+            exit_notice: terminal.exited.then(|| {
+                let status = match terminal.exit_code {
+                    None | Some(0) => "Process exited".to_owned(),
+                    Some(code) => format!("Process exited with code {code}"),
+                };
+                format!("{status} · q or Enter closes")
+            }),
             columns: u16::try_from(columns).unwrap_or(u16::MAX),
             rows: u16::try_from(rows).unwrap_or(u16::MAX),
             cells,

@@ -2706,21 +2706,21 @@ impl App {
                 ));
             return;
         }
-        let mut context = self.active_input_context();
-        if context == "terminal" {
-            if self.typed_past_an_ended_terminal(&key) {
-                return;
-            }
-            context = self.active_input_context();
+        let context = self.active_input_context();
+        if matches!(
+            context.as_str(),
+            "terminal" | "terminal_normal" | "terminal_visual"
+        ) && self.handle_ended_terminal_key(&key, context == "terminal")
+        {
+            return;
         }
         self.handle_key_in_context(&context, key);
     }
 
-    /// A terminal whose program ended reads like a pager: `q` or `enter` closes it, and any
-    /// other plain key goes back to the editor, as if the terminal were never focused. `esc`
-    /// keeps its meaning (twice gives Normal mode, to scroll and copy what the program printed),
-    /// and Ctrl and Alt keys keep their terminal bindings, such as moving to another window.
-    fn typed_past_an_ended_terminal(&mut self, key: &KeyEvent) -> bool {
+    /// A terminal whose program ended reads like a pager: `q` or Enter closes it, and in Input
+    /// mode other plain keys are swallowed without moving focus. Escape still enters Normal
+    /// mode when pressed twice, and navigation, copy, and Ctrl/Alt bindings work as usual.
+    fn handle_ended_terminal_key(&mut self, key: &KeyEvent, input_mode: bool) -> bool {
         use crate::editor::input::KeyCode;
         let Some(id) = self.keyboard_terminal() else {
             return false;
@@ -2737,9 +2737,7 @@ impl App {
             self.close_terminal(id);
             return true;
         }
-        self.set_terminal_focus(false);
-        self.sync_terminal_panel();
-        false
+        input_mode
     }
 }
 
