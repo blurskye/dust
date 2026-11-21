@@ -306,26 +306,6 @@ pub(in crate::app) fn register_commands(
             "Open the item selected on the dashboard",
             AppEffect::DashboardOpen,
         ),
-        (
-            "dashboard.focus.left",
-            "Move to the dashboard box on the left",
-            AppEffect::DashboardFocus(SpatialDirection::Left),
-        ),
-        (
-            "dashboard.focus.down",
-            "Move to the dashboard box below",
-            AppEffect::DashboardFocus(SpatialDirection::Down),
-        ),
-        (
-            "dashboard.focus.up",
-            "Move to the dashboard box above",
-            AppEffect::DashboardFocus(SpatialDirection::Up),
-        ),
-        (
-            "dashboard.focus.right",
-            "Move to the dashboard box on the right",
-            AppEffect::DashboardFocus(SpatialDirection::Right),
-        ),
     ] {
         register(
             registry,

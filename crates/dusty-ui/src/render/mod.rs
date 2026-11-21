@@ -2101,7 +2101,7 @@ fn render_tutor_card(
 
 /// Where the dashboard is drawn: its own window when that floats or docks, otherwise its window
 /// inside the workspace area, from which the compositor has already taken every dock.
-fn dashboard_rect(compositor: &CompositorLayoutState) -> WindowRect {
+pub fn dashboard_rect(compositor: &CompositorLayoutState) -> WindowRect {
     let bounds = compositor.projection.workspace_bounds;
     let window = compositor
         .surfaces

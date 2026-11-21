@@ -269,10 +269,9 @@ fn ctrl_hjkl_move_between_boxes_and_enter_and_numbers_open_the_right_file() {
         assert_eq!(focus(&mut driver), expected, "after {key}");
     }
 
-    // j and k move within the box, and Enter opens the selected file.
-    for key in ["j", "j", "k"] {
-        driver.key(key);
-    }
+    // We entered Recent Files from below, so start at its last row and move up one.
+    // Enter opens the selected file.
+    driver.key("k");
     assert_eq!(driver.application_mut().ui.dashboard_row, 1);
     driver.key("enter");
     assert_eq!(driver.wait_for_opened_file().as_deref(), Some("b.txt"));
@@ -282,6 +281,93 @@ fn ctrl_hjkl_move_between_boxes_and_enter_and_numbers_open_the_right_file() {
     driver.key("ctrl-j");
     driver.key("3");
     assert_eq!(driver.wait_for_opened_file().as_deref(), Some("c.txt"));
+}
+
+#[test]
+fn dashboard_motion_continues_at_box_edges() {
+    use crate::app::tests::driver::TestSession;
+    use crate::app::windows::NativeSurfaceTarget;
+    use crate::ui::render::{dashboard_focus, dashboard_selected_row};
+    use crate::ui::{DashboardChange, DashboardChanges, DashboardPanel, DashboardProject};
+    use crate::windows::WindowRect;
+
+    let mut driver = TestSession::new(crate::config::load_bundled_config());
+    driver.resize(160, 40);
+    let app = driver.application_mut();
+    assert_eq!(app.active_input_context(), "dashboard");
+    let root = app.state.workspace_root.clone();
+    app.ui.dashboard_workspace.changes = Some(DashboardChanges {
+        files: ["a.txt", "b.txt"]
+            .map(|name| DashboardChange {
+                path: root.join(name),
+                label: name.into(),
+                code: 'M',
+                lines: None,
+            })
+            .into(),
+        changed: 2,
+        untracked: 0,
+    });
+    app.ui.dashboard_workspace.projects = vec![DashboardProject {
+        path: root,
+        name: "project".into(),
+        branch: None,
+    }];
+    let focus = |driver: &TestSession| {
+        let app = driver.application();
+        let panel = dashboard_focus(&app.ui, app.dashboard_panels());
+        (panel, dashboard_selected_row(&app.ui, panel))
+    };
+
+    assert_eq!(focus(&driver), (DashboardPanel::Start, 0));
+    let window = driver.focused_window();
+    let notices = driver.application().notices.history().count();
+    for (key, panel, row) in [
+        ("k", DashboardPanel::Changes, 1),
+        ("up", DashboardPanel::Changes, 0),
+        ("k", DashboardPanel::Changes, 0),
+        ("j", DashboardPanel::Changes, 1),
+        ("j", DashboardPanel::Start, 0),
+        ("h", DashboardPanel::Projects, 0),
+        ("l", DashboardPanel::Start, 0),
+        ("left", DashboardPanel::Projects, 0),
+        ("ctrl-l", DashboardPanel::Start, 0),
+        ("right", DashboardPanel::Start, 0),
+        ("ctrl-l", DashboardPanel::Start, 0),
+        ("ctrl-j", DashboardPanel::Start, 0),
+    ] {
+        driver.key(key);
+        assert_eq!(focus(&driver), (panel, row), "after {key}");
+        assert_eq!(driver.focused_window(), window, "after {key}");
+    }
+    let last = driver.application().ui.dashboard_actions.len() - 1;
+    for _ in 0..=last {
+        driver.key("down");
+    }
+    assert_eq!(focus(&driver), (DashboardPanel::Start, last));
+    assert_eq!(driver.focused_window(), window);
+    assert_eq!(driver.application().notices.history().count(), notices);
+
+    // A window at the bottom right returns to Start, not the previously focused Projects box.
+    driver.key("h");
+    driver.key("e");
+    driver.reconcile_windows();
+    driver
+        .application_mut()
+        .apply_native_window_placement(
+            NativeSurfaceTarget::Explorer,
+            WindowPlacement::Floating(WindowRect {
+                x: 115,
+                y: 30,
+                width: 30,
+                height: 8,
+            }),
+        )
+        .unwrap();
+    assert_eq!(driver.application().active_input_context(), "explorer");
+    driver.key("ctrl-k");
+    assert_eq!(driver.focused_window(), window);
+    assert_eq!(focus(&driver), (DashboardPanel::Start, last));
 }
 
 #[test]

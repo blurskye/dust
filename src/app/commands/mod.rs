@@ -175,11 +175,8 @@ pub enum AppEffect {
     ExtendMouseSelection,
     Layout(LayoutAction),
     SurfaceFocus(SpatialDirection),
-    /// Moves the dashboard selection by this many rows in the focused box.
+    /// Moves the dashboard selection by this many rows, handing off to surface focus at the edge.
     DashboardSelect(i8),
-    /// Moves to the dashboard box in this direction, or past the last one to the surface beside
-    /// the dashboard.
-    DashboardFocus(SpatialDirection),
     /// Opens the selected item in the focused dashboard box.
     DashboardOpen,
     /// Opens the dashboard's recent file at this index.
@@ -1194,7 +1191,6 @@ impl App {
             | AppEffect::InspectKeymap { .. }
             | AppEffect::ShowKeymapConflicts) => self.process_configuration_effect(effect),
             effect @ (AppEffect::DashboardSelect(..)
-            | AppEffect::DashboardFocus(..)
             | AppEffect::DashboardOpen
             | AppEffect::DashboardOpenRecent(..)) => self.process_dashboard_effect(effect),
             effect @ (AppEffect::PackageInstall { .. }

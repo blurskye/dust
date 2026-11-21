@@ -371,10 +371,34 @@ impl App {
 }
 
 impl App {
+    fn focus_within_surface(&mut self, direction: SpatialDirection) -> bool {
+        let Some(window) = self.window_session.graph().focused() else {
+            return false;
+        };
+        match self.window_session.native_ids().target_for_window(window) {
+            Some(NativeSurfaceTarget::Dashboard) => self.focus_dashboard_box(direction),
+            _ => false,
+        }
+    }
+
     pub(in crate::app) fn focus_surface(&mut self, direction: SpatialDirection) {
         self.reconcile_editor_windows();
+        if self.focus_within_surface(direction) {
+            return;
+        }
         let Some(target) = self.window_session.spatial_target(direction) else {
             return;
+        };
+        let dashboard_entry = if self.window_session.native_ids().target_for_window(target)
+            == Some(NativeSurfaceTarget::Dashboard)
+        {
+            self.window_session.graph().focused().and_then(|from| {
+                self.compositor_projection()?
+                    .window(from)
+                    .map(|window| window.rect)
+            })
+        } else {
+            None
         };
         let result = self
             .window_session
@@ -387,6 +411,9 @@ impl App {
         if let Err(error) = result {
             self.show_error(error);
             return;
+        }
+        if let Some(from) = dashboard_entry {
+            self.focus_dashboard_from(direction, from);
         }
         self.cancel_pending_mapping();
         self.input.cancel_pending();

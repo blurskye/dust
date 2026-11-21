@@ -1831,7 +1831,7 @@ context = "dashboard"
 keys = "s"
 command = "session.load"
 
-# j and k move within the focused box; Enter opens the selected item and 1-9 open recent files.
+# j and k move within the box, then move focus when there are no more items.
 [[keymap]]
 id = "builtin.dashboard.surface.select-next.j"
 context = "dashboard"
@@ -1921,28 +1921,47 @@ id = "builtin.dashboard.surface.plugin-list.p"
 context = "dashboard"
 keys = "p"
 command = "plugin.list"
-# Ctrl-h/j/k/l move between the dashboard's boxes as between windows, and past the last box to
-# a terminal or panel beside the dashboard.
+# Use the same focus commands as other surfaces. The dashboard's boxes come before other windows.
 [[keymap]]
-id = "builtin.dashboard.surface.dashboard-focus-left.ctrl-h"
+id = "builtin.dashboard.surface.surface-focus-left.ctrl-h"
 context = "dashboard"
 keys = "ctrl-h"
-command = "dashboard.focus.left"
+command = "surface.focus.left"
 [[keymap]]
-id = "builtin.dashboard.surface.dashboard-focus-down.ctrl-j"
+id = "builtin.dashboard.surface.surface-focus-down.ctrl-j"
 context = "dashboard"
 keys = "ctrl-j"
-command = "dashboard.focus.down"
+command = "surface.focus.down"
 [[keymap]]
-id = "builtin.dashboard.surface.dashboard-focus-up.ctrl-k"
+id = "builtin.dashboard.surface.surface-focus-up.ctrl-k"
 context = "dashboard"
 keys = "ctrl-k"
-command = "dashboard.focus.up"
+command = "surface.focus.up"
 [[keymap]]
-id = "builtin.dashboard.surface.dashboard-focus-right.ctrl-l"
+id = "builtin.dashboard.surface.surface-focus-right.ctrl-l"
 context = "dashboard"
 keys = "ctrl-l"
-command = "dashboard.focus.right"
+command = "surface.focus.right"
+[[keymap]]
+id = "builtin.dashboard.surface.surface-focus-left.h"
+context = "dashboard"
+keys = "h"
+command = "surface.focus.left"
+[[keymap]]
+id = "builtin.dashboard.surface.surface-focus-left.left"
+context = "dashboard"
+keys = "left"
+command = "surface.focus.left"
+[[keymap]]
+id = "builtin.dashboard.surface.surface-focus-right.l"
+context = "dashboard"
+keys = "l"
+command = "surface.focus.right"
+[[keymap]]
+id = "builtin.dashboard.surface.surface-focus-right.right"
+context = "dashboard"
+keys = "right"
+command = "surface.focus.right"
 
 # Command/search prompt controls.
 [[keymap]]

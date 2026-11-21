@@ -33,8 +33,7 @@ const HINTS_MIN_HEIGHT: u16 = 12;
 const MARGIN: u16 = 2;
 /// Columns between an action's key and its label.
 const KEY_GAP: u16 = 2;
-const HINTS: &str =
-    "ctrl-h/j/k/l boxes · j/k move · enter open · 1-9 recent file · space space find · F1 commands";
+const HINTS: &str = "h j k l move · Enter open · 1-9 recent file · space space find · F1 commands";
 const ALL_PANELS: [DashboardPanel; 4] = [
     DashboardPanel::RecentFiles,
     DashboardPanel::Changes,
