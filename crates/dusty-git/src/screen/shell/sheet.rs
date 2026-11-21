@@ -484,6 +484,7 @@ fn primary_label(app: &GitScreen, form: &Form) -> &'static str {
         },
         FormAction::SourceSearch => "Find",
         FormAction::Discard(_) | FormAction::DiscardFiles(_) => "Discard",
+        FormAction::StageAnyway(_) => "Stage anyway",
         FormAction::Reference(Ref::MergeBranch { .. }) => "Merge",
         FormAction::Reference(Ref::RebaseBranch { .. }) => "Rebase",
         FormAction::Stash => "Stash",
@@ -650,6 +651,7 @@ fn generic(app: &GitScreen, frame: &mut Frame, form: &Form, lay: &Layout) {
     // A run sheet says what its confirm does first (`Running jobs stop…`), then a gap.
     let note = match &form.action {
         FormAction::Github(action) => app.github.sheet_note(action, &form.fields),
+        FormAction::StageAnyway(plan) => Some(plan.warning.clone()),
         _ => None,
     };
     let w = (body.w * 6 / 10).clamp(56.min(body.w), 110.min(body.w));
@@ -690,7 +692,9 @@ fn generic(app: &GitScreen, frame: &mut Frame, form: &Form, lay: &Layout) {
         String::new()
     };
     let glyph_kind = match &form.action {
-        FormAction::Discard(_) | FormAction::DiscardFiles(_) => Glyph::Warning,
+        FormAction::Discard(_) | FormAction::DiscardFiles(_) | FormAction::StageAnyway(_) => {
+            Glyph::Warning
+        }
         FormAction::Stash => Glyph::Stash,
         FormAction::Branch(_) | FormAction::Reference(_) => Glyph::Branch,
         FormAction::SourceSearch => Glyph::Search,

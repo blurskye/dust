@@ -79,9 +79,24 @@ impl Pick {
 
 /// `<<<<<<<` and its kin: exactly the marker, then nothing or a space and Git's label.
 fn marker(line: &str, sign: char) -> bool {
+    marker_with_size(line, sign, MARKER)
+}
+
+fn marker_with_size(line: &str, sign: char, size: usize) -> bool {
     let line = line.trim_end_matches(['\r', '\n']);
-    line.chars().take_while(|c| *c == sign).count() == MARKER
-        && line[MARKER..].chars().next().is_none_or(|c| c == ' ')
+    line.chars().take_while(|c| *c == sign).count() == size
+        && line[size..].chars().next().is_none_or(|c| c == ' ')
+}
+
+/// Staging checks for individual markers too: a half-edited hunk is no longer a
+/// complete conflict in the reader, but still needs a deliberate override.
+pub(super) fn has_markers(text: &str, size: Option<usize>) -> bool {
+    !text.contains('\0')
+        && text.lines().any(|line| {
+            ['<', '|', '=', '>'].into_iter().any(|sign| {
+                marker(line, sign) || size.is_some_and(|size| marker_with_size(line, sign, size))
+            })
+        })
 }
 
 /// Every complete conflict in `text`, in order. A stray or unfinished marker is not one.

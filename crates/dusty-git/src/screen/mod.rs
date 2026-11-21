@@ -87,6 +87,7 @@ enum FormAction {
     RemoveWorktree(String),
     Reference(refs::Action),
     Confirm(Vec<OsString>),
+    StageAnyway(Box<staging::BulkStage>),
     ConfirmStash {
         action: &'static str,
         reference: String,
@@ -510,6 +511,8 @@ pub struct GitScreen {
     commit_draft: Option<(String, String)>,
     /// `s` (stage only) or `u` (unstage only) for the staging key being handled; `-` toggles.
     stage_intent: Option<bool>,
+    stage_notice: Option<String>,
+    warned_markers: Option<(PathBuf, [u8; 32], GitIndexFingerprint)>,
     /// The confirmed pull, undo, rewrite or tag push still running (`ops.rs`).
     running: Option<ops::Running>,
     /// What the event in hand asks of the host besides drawing (a clipboard copy).
@@ -635,6 +638,8 @@ impl GitScreen {
             rail_unsized: None,
             commit_draft: None,
             stage_intent: None,
+            stage_notice: None,
+            warned_markers: None,
             running: None,
             outcome: None,
         };
@@ -1180,6 +1185,7 @@ impl GitScreen {
                     let finished = self.finish_op(&result);
                     self.receipt = result.as_ref().ok().and_then(|text| commit_receipt(text));
                     self.finish_reflog_form(result.is_ok());
+                    let stage_notice = self.stage_notice.take().filter(|_| result.is_ok());
                     self.busy = false;
                     self.notice = match result {
                         // Silent success: the refreshed panes are the receipt, and a
@@ -1188,7 +1194,7 @@ impl GitScreen {
                         Ok(text) => text.trim().into(),
                         Err(error) => error.replace(['\r', '\n'], " "),
                     };
-                    if let Some(notice) = finished {
+                    if let Some(notice) = finished.or(stage_notice) {
                         self.notice = notice;
                     }
                     // A stopped merge can still have updated the index and working files.
@@ -1713,6 +1719,14 @@ impl GitScreen {
             Some(true) => false,
             None => entry.sources.staged && !entry.sources.unstaged,
         };
+        let (repository_id, status_revision) = (snapshot.repository_id, snapshot.revision);
+        let expected_index = git_index_fingerprint(&self.root).map_err(|e| e.to_string())?;
+        let expected_worktree = if unstage {
+            self.warned_markers = None;
+            None
+        } else {
+            self.check_conflict_markers(&row.value, expected_index)?
+        };
         let kind = if unstage {
             GitMutationKind::UnstageFile
         } else {
@@ -1723,8 +1737,8 @@ impl GitScreen {
                 kind,
                 policy: GitHunkPolicy {
                     scope_root: self.root.clone(),
-                    repository_id: snapshot.repository_id,
-                    status_revision: snapshot.revision,
+                    repository_id,
+                    status_revision,
                     root_revision: 0,
                     file: row.value,
                     layer: if unstage {
@@ -1741,8 +1755,8 @@ impl GitScreen {
                 hunk_id: None,
                 selected: None,
                 selected_lines: Vec::new(),
-                expected_index: Some(git_index_fingerprint(&self.root).map_err(|e| e.to_string())?),
-                expected_worktree: None,
+                expected_index: Some(expected_index),
+                expected_worktree,
                 expected_head: match git_head_id(&self.root).map_err(|e| e.to_string())? {
                     Some(id) => GitHeadExpectation::At(id),
                     None => GitHeadExpectation::Unborn,
@@ -2170,6 +2184,13 @@ impl GitScreen {
             }
             FormAction::Reference(action) => self.submit_reference(action.clone(), &values)?,
             FormAction::Confirm(args) => self.write(args.clone())?,
+            FormAction::StageAnyway(plan) => {
+                // Ctrl-Enter must not bypass the default Cancel button either.
+                let confirmed = form.selected == form.fields.len();
+                let plan = confirmed.then(|| plan.as_ref().clone());
+                self.form = None;
+                return plan.map_or(Ok(()), |plan| self.stage_anyway(plan));
+            }
             FormAction::ConfirmStash {
                 action,
                 reference,
@@ -2946,39 +2967,14 @@ impl GitScreen {
                             }
                             self.load_preview();
                         }
-                        // lazygit `a`: stage everything, or unstage everything when all is staged.
+                        // Toggle the changed files in the current scope.
                         KeyCode::Char('a')
                             if self.focus == 0
                                 && self.last_list == 0
                                 && self.files_view == 0
                                 && !self.all_files =>
                         {
-                            let entries = self
-                                .snapshot
-                                .as_ref()
-                                .map_or(&[][..], |snapshot| snapshot.entries.as_slice());
-                            let all_staged = !entries.is_empty()
-                                && entries
-                                    .iter()
-                                    .all(|entry| entry.sources.staged && !entry.sources.unstaged);
-                            let has_head = git2::Repository::open(&self.root)
-                                .is_ok_and(|repository| repository.head().is_ok());
-                            let result = if entries.is_empty() {
-                                Err("Working tree clean".into())
-                            } else if all_staged && has_head {
-                                self.write(vec!["reset".into(), "-q".into(), "--".into()])
-                            } else if all_staged {
-                                self.write(vec![
-                                    "rm".into(),
-                                    "-r".into(),
-                                    "-q".into(),
-                                    "--cached".into(),
-                                    "--".into(),
-                                    ".".into(),
-                                ])
-                            } else {
-                                self.write(vec!["add".into(), "-A".into(), "--".into()])
-                            };
+                            let result = self.stage_all();
                             self.report(result);
                         }
                         KeyCode::Char('i') if self.last_list == 0 && self.files_view == 0 => {
@@ -3572,6 +3568,166 @@ mod context_tests {
         assert_eq!(remaining, [b, a]);
         wait_for_stashes(&mut screen, 2);
         assert_eq!(title, "drop stash@{0} \"QA original A\"?");
+    }
+
+    #[test]
+    fn bulk_stage_respects_the_filter_and_protects_conflicts_and_staged_blobs() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .current_dir(root)
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env(
+                    "GIT_CONFIG_GLOBAL",
+                    if cfg!(windows) { "NUL" } else { "/dev/null" },
+                )
+                .args([
+                    "-c",
+                    "user.name=Stage test",
+                    "-c",
+                    "user.email=stage@example.invalid",
+                ])
+                .args(args)
+                .output()
+                .unwrap()
+        };
+        let run = |args: &[&str]| {
+            let output = git(args);
+            assert!(output.status.success(), "{args:?}: {:?}", output.stderr);
+        };
+        let write = |name, text: &str| std::fs::write(root.join(name), text).unwrap();
+        run(&["init", "-b", "main"]);
+        write("edit.txt", "base\n");
+        write("conflict.txt", "base\n");
+        run(&["add", "edit.txt", "conflict.txt"]);
+        run(&["commit", "-m", "Base"]);
+        run(&["switch", "-c", "topic"]);
+        write("conflict.txt", "topic\n");
+        run(&["commit", "-am", "Topic"]);
+        run(&["switch", "main"]);
+        write("conflict.txt", "main\n");
+        run(&["commit", "-am", "Main"]);
+        assert!(!git(&["merge", "--no-edit", "topic"]).status.success());
+        write("edit.txt", "worktree change\n");
+        write("new.txt", "new file\n");
+
+        let press = |screen: &mut GitScreen, code| {
+            screen.event(UiEvent::Key {
+                key: KeyEvent::plain(code),
+                kind: KeyInputKind::Press,
+            });
+        };
+        let wait = |screen: &mut GitScreen| {
+            let deadline = std::time::Instant::now() + Duration::from_secs(20);
+            while screen.busy || screen.refreshing || screen.refreshing_after_write {
+                assert!(std::time::Instant::now() < deadline, "Git did not finish");
+                screen.poll();
+                std::thread::yield_now();
+            }
+            assert!(screen.snapshot.is_some());
+        };
+        let bulk = |screen: &mut GitScreen| press(screen, KeyCode::Char('a'));
+        let repo = git2::Repository::open(root).unwrap();
+        let indexed = |name| {
+            let mut index = repo.index().unwrap();
+            index.read(true).unwrap();
+            index.get_path(Path::new(name), 0).map(|entry| entry.id)
+        };
+        let unmerged = || {
+            let mut index = repo.index().unwrap();
+            index.read(true).unwrap();
+            index.get_path(Path::new("conflict.txt"), 2).is_some()
+        };
+        let original_edit = indexed("edit.txt").unwrap();
+        let mut screen = GitScreen::open(root).unwrap();
+        wait(&mut screen);
+
+        press(&mut screen, KeyCode::Char('/'));
+        screen.event(UiEvent::Paste("absent".into()));
+        press(&mut screen, KeyCode::Enter);
+        bulk(&mut screen);
+        assert!(!screen.busy);
+        assert_eq!(screen.notice, "No files match the filter");
+        assert_eq!(indexed("edit.txt"), Some(original_edit));
+        assert!(indexed("new.txt").is_none());
+        assert!(unmerged());
+
+        press(&mut screen, KeyCode::Escape);
+        press(&mut screen, KeyCode::Char('/'));
+        screen.event(UiEvent::Paste("edit.txt".into()));
+        press(&mut screen, KeyCode::Enter);
+        bulk(&mut screen);
+        wait(&mut screen);
+        let staged_edit = indexed("edit.txt").unwrap();
+        assert_ne!(staged_edit, original_edit);
+        assert!(indexed("new.txt").is_none());
+        assert!(unmerged());
+        bulk(&mut screen);
+        wait(&mut screen);
+        assert_eq!(indexed("edit.txt"), Some(original_edit));
+        assert!(indexed("new.txt").is_none());
+        assert!(unmerged());
+
+        press(&mut screen, KeyCode::Escape);
+        bulk(&mut screen);
+        wait(&mut screen);
+        assert_eq!(
+            screen.notice,
+            "Staged 2 files. 1 file with conflicts was skipped: resolve it, then stage it on its own."
+        );
+        assert!(unmerged());
+
+        write("edit.txt", "base\n");
+        screen.refresh().unwrap();
+        wait(&mut screen);
+        bulk(&mut screen);
+        assert!(!screen.busy);
+        let form = screen.form.as_ref().unwrap();
+        assert_eq!(form.title, "Replace staged changes?");
+        assert_eq!(form.selected, form.fields.len() + 1);
+        assert_eq!(indexed("edit.txt"), Some(staged_edit));
+        press(&mut screen, KeyCode::Enter);
+        assert!(screen.form.is_none());
+        assert_eq!(indexed("edit.txt"), Some(staged_edit));
+
+        write("edit.txt", "worktree change\nplus more\n");
+        screen.refresh().unwrap();
+        wait(&mut screen);
+        bulk(&mut screen);
+        assert!(screen.form.is_none());
+        wait(&mut screen);
+        assert_ne!(indexed("edit.txt"), Some(staged_edit));
+        assert!(unmerged());
+
+        // A deleted working copy also needs consent before replacing the staged blob.
+        std::fs::remove_file(root.join("edit.txt")).unwrap();
+        screen.refresh().unwrap();
+        wait(&mut screen);
+        bulk(&mut screen);
+        assert!(!screen.busy);
+        assert!(screen.form.is_some());
+        assert!(indexed("edit.txt").is_some());
+        press(&mut screen, KeyCode::Tab);
+        press(&mut screen, KeyCode::Enter);
+        wait(&mut screen);
+        assert!(indexed("edit.txt").is_none());
+        assert!(unmerged());
+
+        // Single-file staging still works, but only a second attempt accepts unchanged markers.
+        press(&mut screen, KeyCode::Char('/'));
+        screen.event(UiEvent::Paste("conflict.txt".into()));
+        press(&mut screen, KeyCode::Enter);
+        press(&mut screen, KeyCode::Char('s'));
+        assert_eq!(
+            screen.notice,
+            "conflict.txt still has conflict markers. Press again to stage it anyway."
+        );
+        assert!(unmerged());
+        press(&mut screen, KeyCode::Char('s'));
+        wait(&mut screen);
+        assert!(!unmerged(), "{}", screen.notice);
+        assert!(indexed("conflict.txt").is_some());
     }
 
     #[test]

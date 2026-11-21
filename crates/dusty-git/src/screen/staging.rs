@@ -1,6 +1,103 @@
 //! Native Git selections use the existing checked mutation and bounded command workers.
 use super::*;
 
+const CHECK_STAGE: &str = "Couldn't check what is staged";
+const STAGE_CHANGED: &str = "Files changed while you were deciding. Try staging again.";
+
+#[derive(Clone)]
+pub(super) struct BulkStage {
+    paths: BTreeSet<PathBuf>,
+    replacing: BTreeSet<PathBuf>,
+    index: GitIndexFingerprint,
+    head: Option<GitHeadId>,
+    notice: Option<String>,
+    pub(super) warning: String,
+}
+
+fn unmerged_paths(index: &git2::Index) -> Result<BTreeSet<PathBuf>, git2::Error> {
+    let mut paths = BTreeSet::new();
+    for conflict in index.conflicts()? {
+        let conflict = conflict?;
+        paths.extend(
+            [conflict.ancestor, conflict.our, conflict.their]
+                .into_iter()
+                .flatten()
+                .filter_map(|entry| crate::conflict::git_path(&entry.path)),
+        );
+    }
+    Ok(paths)
+}
+
+/// Find staged blobs that would disappear because the worktree is back at HEAD or missing.
+fn staged_only_paths(
+    repo: &git2::Repository,
+    index: &git2::Index,
+    paths: &BTreeSet<PathBuf>,
+    head: Option<GitHeadId>,
+) -> Result<BTreeSet<PathBuf>, git2::Error> {
+    let tree = head
+        .map(|id| repo.find_commit(git2::Oid::from_bytes(&id.0)?)?.tree())
+        .transpose()?;
+    let root = repo
+        .workdir()
+        .ok_or_else(|| git2::Error::from_str("missing working tree"))?;
+    let mut present_in_head = BTreeSet::new();
+    let mut staged_only = BTreeSet::new();
+    for path in paths {
+        let Some(staged) = index.get_path(path, 0) else {
+            continue;
+        };
+        let committed = match tree.as_ref().map(|tree| tree.get_path(path)).transpose() {
+            Ok(committed) => committed,
+            Err(error) if error.code() == git2::ErrorCode::NotFound => None,
+            Err(error) => return Err(error),
+        };
+        if committed
+            .as_ref()
+            .is_some_and(|entry| entry.id() == staged.id)
+        {
+            continue;
+        }
+        match std::fs::symlink_metadata(root.join(path)) {
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+                ) =>
+            {
+                staged_only.insert(path.clone());
+            }
+            Err(_) => return Err(git2::Error::from_str("cannot read working tree")),
+            Ok(_) if committed.is_some() => {
+                present_in_head.insert(path.clone());
+            }
+            Ok(_) => {}
+        }
+    }
+    if !present_in_head.is_empty() {
+        // Two sides only: using the index here would obscure a reverted working copy.
+        // Libgit2 compares worktree blob IDs with Git's built-in clean filters applied.
+        let mut options = git2::DiffOptions::new();
+        options
+            .disable_pathspec_match(true)
+            .ignore_filemode(true)
+            .include_typechange(true);
+        for path in &present_in_head {
+            options.pathspec(path.as_path());
+        }
+        let diff = repo.diff_tree_to_workdir(tree.as_ref(), Some(&mut options))?;
+        for delta in diff.deltas() {
+            if delta.status() != git2::Delta::Deleted
+                && let Some(path) = delta.old_file().path()
+            {
+                present_in_head.remove(path);
+            }
+        }
+        staged_only.append(&mut present_in_head);
+    }
+    Ok(staged_only)
+}
+
 impl GitScreen {
     pub(super) fn stage_directory(&mut self, directory: &Path) -> Result<(), String> {
         self.allow_write()?;
@@ -28,53 +125,219 @@ impl GitScreen {
         self.stage_paths(&paths)
     }
 
-    /// Directory and marked-file staging (`s`, `u`, `-`) share one exact-path staging operation.
+    pub(super) fn stage_all(&mut self) -> Result<(), String> {
+        let snapshot = self.snapshot.as_ref().ok_or("Status is loading")?;
+        let paths = if self.filters[0].active() {
+            let paths = self
+                .rows(0)
+                .iter()
+                .filter(|row| !row.directory)
+                .map(|row| row.value.clone())
+                .collect::<BTreeSet<_>>();
+            if paths.is_empty() {
+                return Err("No files match the filter".into());
+            }
+            paths
+        } else {
+            snapshot
+                .entries
+                .iter()
+                .map(|entry| entry.relative_path.clone())
+                .collect()
+        };
+        if paths.is_empty() {
+            return Ok(());
+        }
+        self.stage_bulk(&paths, true)
+    }
+
+    /// Directory and marked-file staging share the same exact-path safeguards as `a`.
     pub(super) fn stage_paths(&mut self, selection: &BTreeSet<PathBuf>) -> Result<(), String> {
+        self.stage_bulk(selection, false)
+    }
+
+    fn stage_bulk(
+        &mut self,
+        selection: &BTreeSet<PathBuf>,
+        toggle_all: bool,
+    ) -> Result<(), String> {
         self.allow_write()?;
         let snapshot = self.snapshot.as_ref().ok_or("Status is loading")?;
-        let entries = snapshot
-            .entries
+        let mut entries = selection
             .iter()
-            .filter(|entry| selection.contains(&entry.relative_path))
+            .filter_map(|path| memo::entry(&snapshot.entries, path))
             .collect::<Vec<_>>();
         if entries.is_empty() || entries.len() != selection.len() {
             return Err("The marked files changed; refresh and select them again".into());
         }
-        // A mixed selection stages its remaining parent-repository edits. Dirty child
-        // files are not such edits: once a gitlink matches its checkout, `-` reverses
-        // its staging just as it does in Changes and the Submodules tab.
+        let (index_before, head) = self.bulk_stage_state()?;
+        let (repository, index) = self.stage_index()?;
+        let conflicted = unmerged_paths(&index).map_err(|_| CHECK_STAGE)?;
+        let conflicts_with = |path: &Path| {
+            use std::ops::Bound::{Included, Unbounded};
+            path.ancestors()
+                .any(|ancestor| conflicted.contains(ancestor))
+                || conflicted
+                    .range::<Path, _>((Included(path), Unbounded))
+                    .next()
+                    .is_some_and(|conflict| conflict.starts_with(path))
+        };
+        entries.retain(|entry| {
+            entry.status != GitFileStatus::Conflicted
+                && !conflicts_with(&entry.relative_path)
+                && entry
+                    .original_path
+                    .as_deref()
+                    .is_none_or(|path| !conflicts_with(path))
+        });
+        let skipped = selection.len() - entries.len();
+        let skip_notice = match skipped {
+            0 => String::new(),
+            1 => "1 file with conflicts was skipped: resolve it, then stage it on its own.".into(),
+            n => format!(
+                "{n} files with conflicts were skipped: resolve them, then stage them one at a time."
+            ),
+        };
+        if entries.is_empty() {
+            self.notice = skip_notice;
+            return Ok(());
+        }
+        // Dirty submodules can look unstaged in a selection even when their pointer matches.
         let fully_staged = |entry: &GitStatusEntry| {
             entry.sources.staged
                 && (!entry.sources.unstaged
-                    || self.submodule_pointer_matches_index(&entry.relative_path))
+                    || (!toggle_all && self.submodule_pointer_matches_index(&entry.relative_path)))
         };
         let all_staged = entries.iter().all(|entry| fully_staged(entry));
-        // `s` stages what is left and `u` unstages what is staged; `-` toggles the set.
-        let unstage = match self.stage_intent {
-            Some(true) if all_staged => return Err("Already staged · u unstages them".into()),
+        let unstage = match if toggle_all { None } else { self.stage_intent } {
+            Some(true) if all_staged => {
+                if skipped != 0 {
+                    self.notice = skip_notice;
+                    return Ok(());
+                }
+                return Err("Already staged · u unstages them".into());
+            }
             Some(true) => false,
             Some(false) if !entries.iter().any(|entry| entry.sources.staged) => {
+                if skipped != 0 {
+                    self.notice = skip_notice;
+                    return Ok(());
+                }
                 return Err("Nothing staged here · s stages them".into());
             }
             Some(false) => true,
             None => all_staged,
         };
-        let repository = git2::Repository::open(&self.root).map_err(|error| error.to_string())?;
-        let index = repository.index().map_err(|error| error.to_string())?;
         let mut paths = BTreeSet::new();
+        let mut count = 0;
         for entry in entries {
-            if !unstage && fully_staged(entry) {
+            let needs_change = if unstage {
+                entry.sources.staged
+            } else {
+                !fully_staged(entry)
+            };
+            if !needs_change {
                 continue;
             }
+            count += 1;
             paths.insert(entry.relative_path.clone());
             if let Some(original) = &entry.original_path
                 && (unstage || index.get_path(original, 0).is_some())
             {
-                // A rename is one selection, even when its source is outside the directory.
+                // The source and destination together are the rename shown by this row.
                 paths.insert(original.clone());
             }
         }
-        for path in &paths {
+        self.check_stage_paths(&index, &paths, unstage)?;
+        let notice = (skipped != 0).then(|| {
+            let verb = if unstage { "Unstaged" } else { "Staged" };
+            let files = if count == 1 { "file" } else { "files" };
+            format!("{verb} {count} {files}. {skip_notice}")
+        });
+        if unstage {
+            self.check_bulk_stage_state(index_before, head)?;
+            return self.write_stage_paths(paths, true, head.is_some(), notice);
+        }
+
+        let replacing =
+            staged_only_paths(&repository, &index, &paths, head).map_err(|_| CHECK_STAGE)?;
+        self.check_bulk_stage_state(index_before, head)?;
+        if let Some(first) = replacing.first() {
+            let more = if replacing.len() > 1 {
+                format!(" (and {} more)", replacing.len() - 1)
+            } else {
+                String::new()
+            };
+            let warning = format!(
+                "Staging the working copy would erase the staged version of {}{more}, which isn't saved anywhere else.",
+                first.display()
+            );
+            self.form(
+                "Replace staged changes?",
+                FormAction::StageAnyway(Box::new(BulkStage {
+                    paths,
+                    replacing,
+                    index: index_before,
+                    head,
+                    notice,
+                    warning,
+                })),
+                vec![],
+            );
+            self.form.as_mut().expect("just opened").selected = 1; // Cancel.
+            return Ok(());
+        }
+        self.write_stage_paths(paths, false, head.is_some(), notice)
+    }
+
+    fn bulk_stage_state(&self) -> Result<(GitIndexFingerprint, Option<GitHeadId>), String> {
+        Ok((
+            git_index_fingerprint(&self.root).map_err(|_| CHECK_STAGE)?,
+            git_head_id(&self.root).map_err(|_| CHECK_STAGE)?,
+        ))
+    }
+
+    fn check_bulk_stage_state(
+        &self,
+        index: GitIndexFingerprint,
+        head: Option<GitHeadId>,
+    ) -> Result<(), String> {
+        if self.bulk_stage_state()? != (index, head) {
+            return Err(STAGE_CHANGED.into());
+        }
+        Ok(())
+    }
+
+    fn stage_index(&self) -> Result<(git2::Repository, git2::Index), String> {
+        let repo = git2::Repository::open(&self.root).map_err(|_| CHECK_STAGE)?;
+        let index = repo.index().map_err(|_| CHECK_STAGE)?;
+        Ok((repo, index))
+    }
+
+    pub(super) fn stage_anyway(&mut self, plan: BulkStage) -> Result<(), String> {
+        self.check_bulk_stage_state(plan.index, plan.head)?;
+        let (repository, index) = self.stage_index()?;
+        self.check_stage_paths(&index, &plan.paths, false)?;
+        let replacing = staged_only_paths(&repository, &index, &plan.paths, plan.head)
+            .map_err(|_| CHECK_STAGE)?;
+        if !replacing.is_subset(&plan.replacing) {
+            return Err(STAGE_CHANGED.into());
+        }
+        self.check_bulk_stage_state(plan.index, plan.head)?;
+        self.write_stage_paths(plan.paths, false, plan.head.is_some(), plan.notice)
+    }
+
+    fn check_stage_paths(
+        &self,
+        index: &git2::Index,
+        paths: &BTreeSet<PathBuf>,
+        unstage: bool,
+    ) -> Result<(), String> {
+        // Restoring the index cannot sweep up untracked files from a worktree directory.
+        if unstage {
+            return Ok(());
+        }
+        for path in paths {
             let directory = std::fs::symlink_metadata(self.root.join(path))
                 .is_ok_and(|metadata| metadata.file_type().is_dir());
             let gitlink = index
@@ -94,12 +357,20 @@ impl GitScreen {
                 );
             }
         }
+
+        Ok(())
+    }
+
+    fn write_stage_paths(
+        &mut self,
+        paths: BTreeSet<PathBuf>,
+        unstage: bool,
+        has_head: bool,
+        notice: Option<String>,
+    ) -> Result<(), String> {
         let mut args: Vec<OsString> = vec!["--literal-pathspecs".into()];
         if unstage {
-            if git_head_id(&self.root)
-                .map_err(|error| error.to_string())?
-                .is_some()
-            {
+            if has_head {
                 args.extend(["restore", "--source=HEAD", "--staged"].map(Into::into));
             } else {
                 // An unborn index has no HEAD entries to restore. --cached never removes disk files.
@@ -116,7 +387,51 @@ impl GitScreen {
             input.extend_from_slice(path.as_os_str().as_encoded_bytes());
             input.push(0);
         }
-        self.write_with_input(args, Some(input))
+        self.write_with_input(args, Some(input))?;
+        // Shown when the write finishes, in place of its silent success.
+        self.stage_notice = notice;
+        Ok(())
+    }
+
+    pub(super) fn check_conflict_markers(
+        &mut self,
+        path: &Path,
+        expected_index: GitIndexFingerprint,
+    ) -> Result<Option<[u8; 32]>, String> {
+        let warned = self.warned_markers.take();
+        let (repo, index) = self.stage_index()?;
+        if !(1..=3).any(|stage| index.get_path(path, stage).is_some()) {
+            return Ok(None);
+        }
+        let file = self.root.join(path);
+        if std::fs::symlink_metadata(&file)
+            .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+        {
+            return Ok(None);
+        }
+        let (hash, bytes) =
+            worktree_hash(&file).map_err(|_| "Couldn't check for conflict markers")?;
+        let size = repo
+            .get_attr(
+                path,
+                "conflict-marker-size",
+                git2::AttrCheckFlags::default(),
+            )
+            .map_err(|_| "Couldn't check for conflict markers")?
+            .and_then(|value| value.parse::<usize>().ok())
+            .filter(|size| *size > 0);
+        if conflicts::has_markers(&String::from_utf8_lossy(&bytes), size) {
+            let capture = (path.to_path_buf(), hash, expected_index);
+            if warned.as_ref() != Some(&capture) {
+                self.warned_markers = Some(capture);
+                return Err(format!(
+                    "{} still has conflict markers. Press again to stage it anyway.",
+                    path.display()
+                ));
+            }
+        }
+        // The staging worker must apply exactly the bytes that passed the check.
+        Ok(Some(hash))
     }
 
     pub(super) fn clear_hunks(&mut self) {
