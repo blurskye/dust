@@ -24,3 +24,5 @@ pi-session-*.html
 /.dusty-build/
 /dist/
 /.worktree/
+/CLAUDE.md
+/.claude/
