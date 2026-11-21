@@ -2177,6 +2177,8 @@ impl App {
             let outcome = screen.event(event.clone());
             match outcome {
                 crate::git::screen::ScreenOutcome::Continue => {}
+                // Git covers the whole screen, so there is no pane beyond its edge to move to.
+                crate::git::screen::ScreenOutcome::Focus(_) => {}
                 crate::git::screen::ScreenOutcome::Close => {
                     self.git_screen = None;
                     self.git_screen_visible = false;

@@ -208,9 +208,12 @@ fn cursor(screen: &mut GitScreen) -> Option<(usize, String)> {
 }
 /// Focuses a pane by its digit and moves its native cursor onto the row naming `name`.
 fn select(screen: &mut GitScreen, pane: char, name: &str) {
-    char(screen, pane);
     wait(screen, |screen| {
+        // Down past the end of a list (or through one still loading) moves on to the next
+        // pane: each try starts from the pane again and stops where the pane ends.
+        char(screen, pane);
         key(screen, KeyCode::Home);
+        let mut line = cursor_line(screen);
         for _ in 0..40 {
             if cursor(screen).is_some_and(|(x, row)| {
                 x < RAIL && row.chars().take(RAIL).collect::<String>().contains(name)
@@ -218,9 +221,21 @@ fn select(screen: &mut GitScreen, pane: char, name: &str) {
                 return true;
             }
             key(screen, KeyCode::Down);
+            let next = cursor_line(screen);
+            // Within a list the cursor moves one row or the list scrolls under it.
+            if next
+                .zip(line)
+                .is_none_or(|(next, line)| next != line && next != line + 1)
+            {
+                return false;
+            }
+            line = next;
         }
         false
     });
+}
+fn cursor_line(screen: &mut GitScreen) -> Option<u16> {
+    screen.frame(WIDTH, HEIGHT).cursor.map(|(_, y, _)| y)
 }
 /// `v` opens the selected change in the reader; Home puts its cursor on the first line.
 fn reader(screen: &mut GitScreen) {
@@ -670,7 +685,14 @@ fn every_git_lesson_advances_on_real_input_and_quit_restores_the_workspace() {
     key(s, KeyCode::Enter);
     at(s, "Rewrite history · Drop");
     select(s, '4', "Add debug");
-    until(s, |s| char(s, 'd'), |s| view(s).contains("Drop ·"));
+    until(
+        s,
+        |s| char(s, 'd'),
+        |s| {
+            let sheet = view(s);
+            sheet.contains("Drop ") && sheet.contains(" from practice?")
+        },
+    );
     key(s, KeyCode::Enter);
     at(s, "Rewrite history · Move");
     select(s, '4', "First step");

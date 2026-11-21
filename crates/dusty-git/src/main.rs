@@ -108,7 +108,7 @@ fn run(args: Vec<std::ffi::OsString>) -> Result<(), Box<dyn std::error::Error>> 
         if let Some(event) = terminal.poll_event(Duration::from_millis(30))? {
             dirty = true;
             match screen.event(event) {
-                ScreenOutcome::Continue => {}
+                ScreenOutcome::Continue | ScreenOutcome::Focus(_) => {}
                 ScreenOutcome::Close => break,
                 ScreenOutcome::Copy(text) => terminal.copy_to_clipboard(&text)?,
                 ScreenOutcome::OpenRepository(path) => {

@@ -28,6 +28,7 @@ pub use warm::enable as enable_warm_cache;
 use super::*;
 use crate::editor::input::{KeyCode, KeyEvent};
 use crate::ui::{Frame, KeyInputKind, PromptKind, PromptState, UiEvent};
+use crate::windows::SpatialDirection;
 use jobs::{Jobs, Request};
 use preview::Preview;
 use shell::chrome::ReceiptTone;
@@ -43,12 +44,27 @@ use unicode_segmentation::UnicodeSegmentation;
 pub enum ScreenOutcome {
     Continue,
     Close,
+    /// No pane in this direction; let the host look for another window.
+    Focus(SpatialDirection),
     OpenFile(PathBuf),
     /// Open this file at this line (1-based) in the editor: `e` on a diff line.
     OpenFileAt(PathBuf, usize),
     OpenRepository(PathBuf),
     /// Put this text on the system clipboard (`y` on a commit).
     Copy(String),
+}
+
+fn control_direction(key: &KeyEvent) -> Option<SpatialDirection> {
+    if !key.modifiers.control || key.modifiers.alt {
+        return None;
+    }
+    match key.code {
+        KeyCode::Char('h' | 'H') => Some(SpatialDirection::Left),
+        KeyCode::Char('j' | 'J') => Some(SpatialDirection::Down),
+        KeyCode::Char('k' | 'K') => Some(SpatialDirection::Up),
+        KeyCode::Char('l' | 'L') => Some(SpatialDirection::Right),
+        _ => None,
+    }
 }
 
 /// History's first read, in commits (lazygit's is also 300).
@@ -2778,14 +2794,10 @@ impl GitScreen {
                     return self.github_key(&key);
                 }
                 if key.modifiers.control {
-                    if let KeyCode::Char(c) = key.code {
-                        match c.to_ascii_lowercase() {
-                            'h' => self.focus = self.last_list,
-                            'l' => self.focus = 4,
-                            'j' if self.focus < 4 => self.focus = (self.focus + 1).min(3),
-                            'k' if self.focus < 4 => self.focus = self.focus.saturating_sub(1),
-                            _ => {}
-                        }
+                    if let Some(direction) = control_direction(&key)
+                        && !self.focus_toward(direction)
+                    {
+                        return ScreenOutcome::Focus(direction);
                     }
                 } else {
                     match key.code {
@@ -2838,22 +2850,38 @@ impl GitScreen {
                         KeyCode::Tab => {
                             self.focus = (self.focus + if key.modifiers.shift { 4 } else { 1 }) % 5
                         }
-                        KeyCode::Char('j') | KeyCode::Down => self.move_selection(1),
-                        KeyCode::Char('k') | KeyCode::Up => self.move_selection(-1),
-                        KeyCode::PageDown => self.move_selection(if self.focus == 4 {
-                            self.preview_visible.max(1) as isize
-                        } else {
-                            15
-                        }),
-                        KeyCode::PageUp => self.move_selection(if self.focus == 4 {
-                            -(self.preview_visible.max(1) as isize)
-                        } else {
-                            -15
-                        }),
+                        KeyCode::Char('j' | 'k') | KeyCode::Down | KeyCode::Up => {
+                            let (delta, direction) =
+                                if matches!(key.code, KeyCode::Char('j') | KeyCode::Down) {
+                                    (1, SpatialDirection::Down)
+                                } else {
+                                    (-1, SpatialDirection::Up)
+                                };
+                            if !self.move_selection(delta) && !self.focus_toward(direction) {
+                                return ScreenOutcome::Focus(direction);
+                            }
+                        }
+                        KeyCode::PageDown | KeyCode::PageUp => {
+                            let rows = if self.focus == 4 {
+                                self.preview_visible.max(1) as isize
+                            } else {
+                                15
+                            };
+                            self.move_selection(if key.code == KeyCode::PageDown {
+                                rows
+                            } else {
+                                -rows
+                            });
+                        }
                         KeyCode::Home if self.focus == 4 => self.preview_edge(false),
                         KeyCode::End if self.focus == 4 => self.preview_edge(true),
-                        KeyCode::Home => self.move_selection(isize::MIN),
-                        KeyCode::End => self.move_selection(isize::MAX),
+                        KeyCode::Home | KeyCode::End => {
+                            self.move_selection(if key.code == KeyCode::Home {
+                                isize::MIN
+                            } else {
+                                isize::MAX
+                            });
+                        }
                         KeyCode::Char('|') if self.focus == 4 => {
                             self.split_diff = !self.split_diff;
                             self.preview_offset = 0;
@@ -2881,13 +2909,15 @@ impl GitScreen {
                             self.report(result);
                         }
                         KeyCode::Left | KeyCode::Char('h') if self.focus == 4 => {
-                            self.preview.search.leave_match();
-                            self.preview.cursor_byte = None;
-                            self.preview_column = self.preview_column.saturating_sub(8);
+                            if self.preview_column == 0 {
+                                self.focus_toward(SpatialDirection::Left);
+                            } else {
+                                self.preview.search.leave_match();
+                                self.preview.cursor_byte = None;
+                                self.preview_column = self.preview_column.saturating_sub(8);
+                            }
                         }
                         KeyCode::Right | KeyCode::Char('l') if self.focus == 4 => {
-                            self.preview.search.leave_match();
-                            self.preview.cursor_byte = None;
                             use unicode_width::UnicodeWidthStr;
                             let maximum = self
                                 .preview
@@ -2896,10 +2926,13 @@ impl GitScreen {
                                 .map(|row| row.text.width())
                                 .max()
                                 .unwrap_or(0);
-                            self.preview_column = self
-                                .preview_column
-                                .saturating_add(8)
-                                .min(maximum.saturating_sub(1));
+                            let last = maximum.saturating_sub(1);
+                            if self.preview_column < last {
+                                self.preview.search.leave_match();
+                                self.preview.cursor_byte = None;
+                                self.preview_column =
+                                    self.preview_column.saturating_add(8).min(last);
+                            }
                         }
                         KeyCode::Left | KeyCode::Right | KeyCode::Char('h' | 'l')
                             if self.focus == 0 && self.files_view == 0 =>
@@ -2936,6 +2969,17 @@ impl GitScreen {
                             // must not keep the hidden file, and unfolding brings it back.
                             if self.changes_collapsed != was_collapsed {
                                 self.load_preview();
+                            }
+                        }
+                        KeyCode::Left | KeyCode::Right | KeyCode::Char('h' | 'l') => {
+                            let direction =
+                                if matches!(key.code, KeyCode::Left | KeyCode::Char('h')) {
+                                    SpatialDirection::Left
+                                } else {
+                                    SpatialDirection::Right
+                                };
+                            if !self.focus_toward(direction) {
+                                return ScreenOutcome::Focus(direction);
                             }
                         }
                         // `v`: stage by lines in the reader; `F` browses every file.
@@ -3206,21 +3250,45 @@ impl GitScreen {
         }
         ScreenOutcome::Continue
     }
-    fn move_selection(&mut self, delta: isize) {
+    fn focus_toward(&mut self, direction: SpatialDirection) -> bool {
+        use SpatialDirection::{Down, Left, Right, Up};
+
+        // The sidebar stays in this order even when narrow mode shows one pane at a time.
+        // The layout folds an empty Stashes pane down to its "No stashes" label.
+        let next = match (self.focus, direction) {
+            (4, Left) => self.last_list,
+            (0..=3, Right) => 4,
+            (0..=2, Down) if self.focus != 2 || !self.stashes.is_empty() => self.focus + 1,
+            (1..=3, Up) => self.focus - 1,
+            _ => return false,
+        };
+        if direction == Up {
+            let slot = self.slot(next);
+            self.selected[slot] = self.rows(next).len().saturating_sub(1);
+        }
+        self.focus = next;
+        true
+    }
+
+    /// Whether the pane consumed the movement. Vertical reader navigation stays local.
+    fn move_selection(&mut self, delta: isize) -> bool {
         if self.focus == 4 {
             self.move_preview(delta);
-        } else {
-            let slot = self.slot(self.focus);
-            self.selected[slot] = self.selected[slot]
-                .saturating_add_signed(delta)
-                .min(self.rows(self.focus).len().saturating_sub(1));
-            if self.focus == 0 && self.file_selection_context() {
-                self.extend_file_range();
-            }
-            if self.focus == 2 && self.history_view == 0 {
-                self.more_history(delta == isize::MAX);
-            }
+            return true;
         }
+        let slot = self.slot(self.focus);
+        let before = self.selected[slot];
+        let row_count = self.rows(self.focus).len();
+        self.selected[slot] = before
+            .saturating_add_signed(delta)
+            .min(row_count.saturating_sub(1));
+        if self.focus == 0 && self.file_selection_context() {
+            self.extend_file_range();
+        }
+        if self.focus == 2 && self.history_view == 0 {
+            self.more_history(delta == isize::MAX);
+        }
+        row_count != 0 && self.selected[slot] != before
     }
     /// History reads `HISTORY_PAGE` commits, then four times as many each time the cursor
     /// comes within a third of a page of the end, and the whole log on `End`. Each read
@@ -3273,6 +3341,9 @@ impl GitScreen {
         self.notice.clear();
         let result = self.github.event(key, self.write_refusal.as_deref());
         self.page = self.github.current_page();
+        if let Some(direction) = self.github.focus_exit.take() {
+            return ScreenOutcome::Focus(direction);
+        }
         if let Some(text) = self.github.copied.take() {
             return ScreenOutcome::Copy(text);
         }
@@ -3507,6 +3578,52 @@ mod context_tests {
         repository.set_head(selected).unwrap();
         let current = RefPreviewContext::capture(&repository, selected, other).unwrap();
         assert!(current.selected_is_current && current.head_at_tip);
+    }
+
+    #[test]
+    fn status_motions_share_focus_at_pane_edges() {
+        let directory = tempfile::tempdir().unwrap();
+        git2::Repository::init(directory.path()).unwrap();
+        let mut screen = GitScreen::open(directory.path()).unwrap();
+        let folder = PathBuf::from("src");
+        screen.seed_rows(
+            0,
+            vec![
+                Row {
+                    directory: true,
+                    ..Row::plain("src".into(), folder.clone())
+                },
+                Row::plain("main.rs".into(), folder.join("main.rs")),
+            ],
+        );
+        let press = |screen: &mut GitScreen, key: &str| {
+            screen.event(UiEvent::Key {
+                key: key.parse().unwrap(),
+                kind: KeyInputKind::Press,
+            })
+        };
+
+        press(&mut screen, "j");
+        assert_eq!((screen.focus, screen.selected[0]), (0, 1));
+        press(&mut screen, "j");
+        assert_eq!(screen.focus, 1);
+
+        press(&mut screen, "ctrl-l");
+        assert_eq!(
+            press(&mut screen, "ctrl-j"),
+            ScreenOutcome::Focus(SpatialDirection::Down)
+        );
+        press(&mut screen, "h");
+        assert_eq!(screen.focus, 1);
+
+        // Up from an empty Branches pane lands at the end of Changes, not its old row.
+        screen.selected[0] = 0;
+        press(&mut screen, "k");
+        assert_eq!((screen.focus, screen.selected[0]), (0, 1));
+        press(&mut screen, "k");
+        press(&mut screen, "h");
+        assert!(screen.collapsed.contains(&folder));
+        assert_eq!(screen.focus, 0);
     }
 
     #[test]

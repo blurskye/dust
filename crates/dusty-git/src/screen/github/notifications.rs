@@ -608,6 +608,17 @@ impl Workspace {
         }
         let count = self.shown_threads().len();
         let before = self.notify.selected;
+        if let Some(direction) = control_direction(key)
+            && match direction {
+                SpatialDirection::Up => before == 0,
+                SpatialDirection::Down => before >= count.saturating_sub(1),
+                SpatialDirection::Left => self.sidebar_hidden(),
+                SpatialDirection::Right => true,
+            }
+        {
+            self.focus_exit = Some(direction);
+            return Ok(None);
+        }
         let moving = matches!(
             key.code,
             KeyCode::Down
@@ -696,6 +707,17 @@ impl Workspace {
     fn sidebar_key(&mut self, key: &KeyEvent) -> Result<Option<Form>, String> {
         let entries = self.side_entries();
         let last = entries.len().saturating_sub(1);
+        if let Some(direction) = control_direction(key)
+            && match direction {
+                SpatialDirection::Up => self.notify.side_at == 0,
+                SpatialDirection::Down => self.notify.side_at >= last,
+                SpatialDirection::Left => true,
+                SpatialDirection::Right => false,
+            }
+        {
+            self.focus_exit = Some(direction);
+            return Ok(None);
+        }
         match key.code {
             KeyCode::Down | KeyCode::Char('j') => {
                 self.notify.side_at = (self.notify.side_at + 1).min(last)

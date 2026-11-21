@@ -33,7 +33,7 @@ mod suggestion;
 pub(super) mod tutor;
 mod views;
 mod workflow;
-use super::{Field, Form, FormAction};
+use super::{Field, Form, FormAction, SpatialDirection, control_direction};
 use crate::editor::input::{KeyCode, KeyEvent};
 use crate::forge::legacy::Shape;
 use crate::forge::model::ItemKind;
@@ -211,6 +211,7 @@ pub(super) struct Workspace {
     reading: bool,
     /// Text a key copied (`y` on a run's log): the screen hands it to the clipboard.
     pub(super) copied: Option<String>,
+    pub(super) focus_exit: Option<SpatialDirection>,
     detail_rows: Vec<lines::Line>,
     detail_find: find::DetailFind,
     reading_position: lines::ReadingPosition,
@@ -307,6 +308,7 @@ impl Workspace {
             reveal_top: false,
             reading: false,
             copied: None,
+            focus_exit: None,
             detail_rows: Vec::new(),
             detail_find: find::DetailFind::default(),
             reading_position: lines::ReadingPosition::default(),

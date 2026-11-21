@@ -13,6 +13,38 @@ use crate::ui::PromptKind;
 use std::path::Path;
 
 #[test]
+fn git_focus_outcome_at_the_edge_keeps_git_on_screen() {
+    use crate::app::tests::driver::TestSession;
+    use crate::ui::{KeyInputKind, UiEvent};
+
+    let mut session = TestSession::new(load_bundled_config());
+    session.new_buffer();
+    let app = &mut session.application;
+    let press = |app: &mut crate::app::App, key: &str| {
+        app.handle_event(UiEvent::Key {
+            key: key.parse().unwrap(),
+            kind: KeyInputKind::Press,
+        });
+    };
+    let original = app.window_session.graph().focused().unwrap();
+    press(app, "ctrl-w");
+    press(app, "s");
+    let split = app.window_session.graph().focused().unwrap();
+    assert_ne!(original, split);
+
+    let root = &app.state.workspace_root;
+    git2::Repository::init(root).unwrap();
+    app.git_screen = Some(crate::git::screen::GitScreen::open(root).unwrap());
+    app.git_screen_visible = true;
+    // From the reader, Ctrl-k has no pane above it inside Git. The editor windows are hidden
+    // behind Git, so focus stays put instead of moving to a window the user can't see.
+    press(app, "0");
+    press(app, "ctrl-k");
+    assert!(app.git_screen_visible);
+    assert_eq!(app.window_session.graph().focused(), Some(split));
+}
+
+#[test]
 fn named_mode_uses_its_layer_cursor_label_and_base_typing_policy() {
     use crate::app::commands::AppEffect;
     use crate::app::input::InputCommand;
