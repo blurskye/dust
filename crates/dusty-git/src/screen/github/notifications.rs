@@ -4,11 +4,11 @@
 //! repositories, each with its unread count; beside it the chosen view's threads, grouped by
 //! repository, one row each (type glyph, title, `#13`, reason chip, time), with `All │
 //! Unread` above them. `Enter` opens the pull request or issue reader in its own tab (`Esc`
-//! there comes back here) or the run in Actions; `e` marks a thread done, `s` saves it, `m` /
-//! `M` mark read and `u` unsubscribes. Saved and Done are this repository's own marks (its
-//! local Git config); the only forge writes are the existing mark-read and unsubscribe. The
-//! list is read the first time the page is painted, never while `<`/`>` pass over it, so a
-//! visit costs one request.
+//! there comes back here), the run in Actions, or a release in the browser; `e` marks a
+//! thread done, `s` saves it, `m` / `M` mark read and `u` unsubscribes. Saved and Done live
+//! in this repository's Git config; the only forge writes are mark-read and unsubscribe.
+//! The list is read the first time the page is painted, never while `<`/`>` pass over it,
+//! so a visit costs one request.
 
 use super::super::shell::chrome::{self, Span, bold, st};
 use super::super::shell::glyphs::{Glyph, glyph};
@@ -114,7 +114,7 @@ pub(super) struct Inbox {
     side_at: usize,
     /// The page has been painted once: its list may be read.
     wanted: bool,
-    /// Threads marked read or unsubscribed here, ahead of the forge's next list.
+    /// Local reads and confirmed writes, ahead of the forge's next list.
     read: HashSet<String>,
     gone: HashSet<String>,
     /// Saved and done threads (`host/id`), read from the local Git config once.
@@ -214,9 +214,28 @@ impl Workspace {
             .get("Notifications")
             .map_or(Value::Null, |page| page["items"].clone());
         let mut threads: Vec<Notification> = serde_json::from_value(items).unwrap_or_default();
-        threads.retain(|thread| !self.notify.gone.contains(&thread.id.0));
+        // Use the shared write queue and active request as the optimistic overlay. Once the
+        // request finishes, a rejected change simply drops away; the source list never moved.
+        let pending = self
+            .active
+            .requests()
+            .chain(self.queue.iter())
+            .find_map(|request| match &request.op {
+                Op::Write(
+                    target,
+                    write @ (Write::MarkRead(_) | Write::MarkAllRead | Write::Unsubscribe(_)),
+                ) if target.host.as_deref() == Some(self.host.as_str()) => Some(write),
+                _ => None,
+            });
+        threads.retain(|thread| {
+            !self.notify.gone.contains(&thread.id.0)
+                && !matches!(pending, Some(Write::Unsubscribe(id)) if *id == thread.id)
+        });
         for thread in &mut threads {
-            if self.notify.read.contains(&thread.id.0) {
+            if self.notify.read.contains(&thread.id.0)
+                || matches!(pending, Some(Write::MarkAllRead))
+                || matches!(pending, Some(Write::MarkRead(id)) if *id == thread.id)
+            {
                 thread.unread = false;
             }
         }
@@ -504,8 +523,37 @@ impl Workspace {
                     .ok_or("The run is not known yet · Enter opens it in Actions")?;
                 self.activate(Action::Web(3, 0, url))
             }
+            NotifyTarget::Release(_) => self.open_release(&thread),
             _ => Err("This notification has no page to open".into()),
         }
+    }
+
+    fn release_url(&self, thread: &Notification) -> Option<String> {
+        let NotifyTarget::Release(url) = &thread.target else {
+            return None;
+        };
+        let address = url
+            .strip_prefix("https://")
+            .or_else(|| url.strip_prefix("http://"))?;
+        let (host, path) = address.split_once('/')?;
+        // GitHub's notification can name a REST release ID, not its tag. There is no
+        // release reader: show the repository's Releases page instead of REST JSON.
+        if host.eq_ignore_ascii_case("api.github.com") || path.starts_with("api/v3/repos/") {
+            Some(format!(
+                "https://{}/{}/releases",
+                self.host,
+                thread_repo(self, thread)
+            ))
+        } else {
+            Some(url.clone())
+        }
+    }
+
+    fn open_release(&mut self, thread: &Notification) -> Result<Option<Form>, String> {
+        let url = self
+            .release_url(thread)
+            .ok_or("This notification has no page to open")?;
+        self.activate(Action::Web(PAGE, 0, url))
     }
 
     pub(super) fn notification_key(&mut self, key: &KeyEvent) -> Result<Option<Form>, String> {
@@ -587,21 +635,11 @@ impl Workspace {
             }
             KeyCode::Char('m') => {
                 let thread = self.selected_thread().ok_or("No notification selected")?;
-                if !thread.unread {
-                    return Err(format!("{} is already read", target_words(&thread)));
+                if thread.unread {
+                    self.mark(Write::MarkRead(thread.id))?;
                 }
-                self.mark(Write::MarkRead(thread.id.clone()))?;
-                self.notify.read.insert(thread.id.0.clone());
-                self.notice = format!("✓ Marked {} read", target_words(&thread));
             }
-            KeyCode::Char('M') => {
-                let threads = self.threads();
-                self.mark(Write::MarkAllRead)?;
-                self.notify
-                    .read
-                    .extend(threads.into_iter().map(|thread| thread.id.0));
-                self.notice = "✓ Marked every notification read".into();
-            }
+            KeyCode::Char('M') => self.mark(Write::MarkAllRead)?,
             KeyCode::Char('e') => {
                 let thread = self.selected_thread().ok_or("No notification selected")?;
                 self.toggle_done(&thread)?;
@@ -638,13 +676,7 @@ impl Workspace {
             }
             KeyCode::Char('u') => {
                 let thread = self.selected_thread().ok_or("No notification selected")?;
-                self.mark(Write::Unsubscribe(thread.id.clone()))?;
-                self.notify.gone.insert(thread.id.0.clone());
-                self.notify.selected = self.notify.selected.min(count.saturating_sub(2));
-                self.notice = format!(
-                    "✓ Unsubscribed · {} stops notifying you",
-                    target_words(&thread)
-                );
+                self.mark(Write::Unsubscribe(thread.id))?;
             }
             KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => {
                 let thread = self.selected_thread().ok_or("No notification selected")?;
@@ -699,6 +731,9 @@ impl Workspace {
     /// `e`: Done, as on GitHub; in Done it moves the thread back to the inbox. Done is this
     /// repository's own mark; a thread still unread is also marked read on the forge.
     fn toggle_done(&mut self, thread: &Notification) -> Result<(), String> {
+        if !self.is_done(thread) && thread.unread && self.notifications_available() {
+            self.mark(Write::MarkRead(thread.id.clone()))?;
+        }
         let mark = self.thread_mark(thread);
         let marks = self.notify.marks.get_or_insert_with(Marks::default);
         let done = if let Some(at) = marks.done.iter().position(|kept| *kept == mark) {
@@ -717,10 +752,6 @@ impl Workspace {
             self.notice = format!("✓ Moved {} to the inbox", target_words(thread));
             return Ok(());
         }
-        if thread.unread && self.notifications_available() {
-            self.mark(Write::MarkRead(thread.id.clone()))?;
-            self.notify.read.insert(thread.id.0.clone());
-        }
         self.notice = format!("✓ Done · {}", target_words(thread));
         Ok(())
     }
@@ -729,7 +760,12 @@ impl Workspace {
         if let Some(reason) = self.capabilities().notifications.reason() {
             return Err(reason.into());
         }
+        if self.writing() {
+            return Err("Wait for the current action to finish".into());
+        }
+        self.cache.remove(&Key::Write);
         self.enqueue(Key::Write, Op::Write(self.target(), write), false);
+        self.notice.clear();
         self.notice_error = false;
         Ok(())
     }
@@ -776,6 +812,7 @@ impl Workspace {
                     None => Ok(None),
                 }
             }
+            NotifyTarget::Release(_) => self.open_release(thread),
             _ => Err("This notification has no target to open here".into()),
         }
     }
@@ -792,27 +829,64 @@ impl Workspace {
         self.notify.selected = self.notify.selected.min(shown.len().saturating_sub(1));
     }
 
-    /// The receipt for a finished notification write.
+    /// Commit the change only on the shared write receipt, before the list is refreshed.
     pub(super) fn notification_written(&mut self, write: &Write) -> Option<String> {
-        match write {
-            Write::MarkRead(_) | Write::MarkAllRead | Write::Unsubscribe(_) => {
-                // Keep the local marks: the forge's list catches up on the next read.
-                Some(match write {
-                    Write::MarkRead(id) => {
-                        match self.threads().iter().find(|thread| thread.id == *id) {
-                            Some(thread) if self.is_done(thread) => {
-                                format!("✓ Done · {}", target_words(thread))
-                            }
-                            Some(thread) => format!("✓ Marked {} read", target_words(thread)),
-                            None => "✓ Marked read".into(),
-                        }
+        Some(match write {
+            Write::MarkRead(id) => {
+                self.notify.read.insert(id.0.clone());
+                match self.threads().iter().find(|thread| thread.id == *id) {
+                    Some(thread) if self.is_done(thread) => {
+                        format!("✓ Done · {}", target_words(thread))
                     }
-                    Write::MarkAllRead => "✓ Marked every notification read".into(),
-                    _ => "✓ Unsubscribed".into(),
-                })
+                    Some(thread) => format!("✓ Marked {} read", target_words(thread)),
+                    None => "✓ Marked read".into(),
+                }
             }
-            _ => None,
-        }
+            Write::MarkAllRead => {
+                let threads = self.threads();
+                self.notify
+                    .read
+                    .extend(threads.into_iter().map(|thread| thread.id.0));
+                "✓ Marked every notification read".into()
+            }
+            Write::Unsubscribe(id) => {
+                self.notify.gone.insert(id.0.clone());
+                self.notify.selected = self
+                    .notify
+                    .selected
+                    .min(self.shown_threads().len().saturating_sub(1));
+                "✓ Unsubscribed".into()
+            }
+            _ => return None,
+        })
+    }
+
+    pub(super) fn notification_write_error(&self, write: &Write, error: &str) -> Option<String> {
+        let action = match write {
+            Write::MarkRead(_) => "Couldn't mark it read",
+            Write::MarkAllRead => "Couldn't mark all notifications read",
+            Write::Unsubscribe(_) => "Couldn't unsubscribe",
+            _ => return None,
+        };
+        let head = error.split(" · ").next().unwrap_or_default();
+        Some(match head {
+            "No permission"
+            | "Rate limited"
+            | "Network error"
+            | "Not found"
+            | "Unexpected response"
+            | "Timed out waiting for the forge" => {
+                format!("{action}: {}", self.explain(error).headline)
+            }
+            "Unsupported here" => format!("{action}: not available on this site"),
+            _ if head.starts_with("Not signed in")
+                || head.starts_with("Sign in to ")
+                || head.ends_with("requires sign-in") =>
+            {
+                format!("{action}: {}", self.explain(error).headline)
+            }
+            _ => action.into(),
+        })
     }
 }
 
@@ -1124,11 +1198,20 @@ pub(in crate::screen) fn frame(app: &mut GitScreen, width: u16, height: u16) -> 
         let saved = thread
             .as_ref()
             .is_some_and(|thread| workspace.is_saved(thread));
-        let mut hints = vec![
-            ("Enter", "open"),
+        let mut hints = Vec::new();
+        match thread.as_ref() {
+            Some(thread) if matches!(thread.target, NotifyTarget::Release(_)) => {
+                if workspace.release_url(thread).is_some() {
+                    hints.push(("Enter", "browser"));
+                }
+            }
+            Some(_) => hints.push(("Enter", "open")),
+            None => {}
+        }
+        hints.extend([
             ("e", if done { "inbox" } else { "done" }),
             ("s", if saved { "unsave" } else { "save" }),
-        ];
+        ]);
         if unread {
             hints.push(("m", "mark read"));
         }
@@ -1607,6 +1690,75 @@ mod tests {
             },
             updated: Timestamp("2026-01-01T00:00:00Z".into()),
             comment: None,
+        }
+    }
+
+    #[test]
+    fn rejected_notification_writes_restore_the_inbox() {
+        use crate::forge::request::ForgeError;
+
+        let mut workspace = Workspace::new(PathBuf::new());
+        workspace.host = "notifications.example".into();
+        workspace.repo = "o/r".into();
+        workspace.active = lanes::Lanes::dry();
+        let mut first = thread(NotifyReason::Mentioned);
+        first.unread = false;
+        let mut last = thread(NotifyReason::Subscribed);
+        last.id = ItemId::new("2");
+        let value = serde_json::json!({"Notifications": {"items": [&first, &last]}});
+        workspace.cache.insert(
+            Key::Notifications,
+            Ok(Reply {
+                text: value.to_string(),
+                value,
+            }),
+        );
+
+        let press = |workspace: &mut Workspace, ch| {
+            workspace
+                .notification_key(&KeyEvent::character(ch))
+                .unwrap();
+        };
+        // An already-read row doesn't start a write or post a notice.
+        press(&mut workspace, 'm');
+        assert!(!workspace.writing());
+        assert!(workspace.notice.is_empty());
+
+        workspace.notify.selected = 1;
+        for (ch, action) in [
+            ('m', "Couldn't mark it read"),
+            ('u', "Couldn't unsubscribe"),
+        ] {
+            press(&mut workspace, ch);
+            assert!(workspace.start_reads());
+            let shown = workspace.shown_threads();
+            if ch == 'm' {
+                assert!(!shown[1].unread);
+            } else {
+                assert_eq!(shown, [first.clone()]);
+            }
+
+            // Let the fake forge reject the running request through the normal reply path.
+            let request = workspace.active.finish(&Key::Write).unwrap();
+            let Op::Write(_, write) = &request.op else {
+                panic!("expected a notification write");
+            };
+            let reply = ForgeReply::Written(write.clone(), Err(ForgeError::Network("500".into())));
+            let scope = (
+                workspace.host.clone(),
+                workspace.repo.clone(),
+                workspace.scope_epoch,
+            );
+            workspace.active.answer_for_test(request, scope, reply);
+            assert!(workspace.poll());
+
+            assert_eq!(workspace.shown_threads(), [first.clone(), last.clone()]);
+            assert_eq!(workspace.selected_thread().unwrap().id, last.id);
+            assert!(workspace.notice_error);
+            assert_eq!(
+                workspace.notice,
+                format!("{action}: notifications.example is having problems")
+            );
         }
     }
 

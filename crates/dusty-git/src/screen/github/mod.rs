@@ -1282,8 +1282,21 @@ impl Workspace {
                 self.then_write = None;
                 self.settle(false);
                 self.notice_error = true;
-                let words = self.explain(&error.to_string());
-                self.notice = format!("{} · your draft is kept", words.headline);
+                let has_draft = self
+                    .writing_draft
+                    .take()
+                    .and_then(|key| self.drafts.get(&key))
+                    .is_some_and(|values| values.iter().any(|value| !value.trim().is_empty()));
+                self.notice = if let Some(notice) = self.notification_write_error(write, &error) {
+                    notice
+                } else {
+                    let headline = self.explain(&error).headline;
+                    if has_draft {
+                        format!("{headline} · your draft is kept")
+                    } else {
+                        headline
+                    }
+                };
             }
         }
     }
