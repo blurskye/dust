@@ -38,10 +38,11 @@ pub(super) fn paint(app: &mut GitScreen, frame: &mut Frame, pane: usize, rect: R
             Glyph::HistoryPane,
             app.history_target
                 .as_ref()
-                .filter(|(_, reference)| reference != "HEAD")
+                .and_then(|(_, reference)| reference.to_str())
+                .filter(|reference| *reference != "HEAD")
                 .map_or_else(
                     || "History".into(),
-                    |(_, reference)| format!("History · {}", reference.to_string_lossy()),
+                    |reference| format!("History · {}", crate::history::ref_label(reference)),
                 ),
         ),
         _ => (Glyph::Stash, "Stashes".into()),

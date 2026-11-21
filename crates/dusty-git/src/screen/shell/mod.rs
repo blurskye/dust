@@ -665,6 +665,7 @@ fn footer(app: &GitScreen, frame: &mut Frame, rect: Rect) {
                 ("d", "delete"),
             ],
             (2, _, _, 1) => vec![("n", "rescue branch"), ("o", "detach"), ("Enter", "files")],
+            (2, ..) if !app.history_rewrite_hints() => vec![("Enter", "files")],
             (2, ..) => vec![
                 ("Enter", "files"),
                 ("W", "reword"),

@@ -916,7 +916,8 @@ impl GitScreen {
             let selected_ref = self
                 .history_target
                 .as_ref()
-                .and_then(|(_, reference)| reference.to_str());
+                .and_then(|(_, reference)| reference.to_str())
+                .map(crate::history::ref_label);
             commit.decorations = repository
                 .as_ref()
                 .map(|repository| commit::tip_decorations(repository, &commit.id, selected_ref))
@@ -1160,7 +1161,8 @@ impl GitScreen {
                     let selected_ref = self
                         .history_target
                         .as_ref()
-                        .and_then(|(_, reference)| reference.to_str());
+                        .and_then(|(_, reference)| reference.to_str())
+                        .map(crate::history::ref_label);
                     if let Some(commit) = commit::Commit::parse(&text, selected_ref)
                         && self.last_list == 2
                         && self
@@ -1613,7 +1615,15 @@ impl GitScreen {
             if self.subview == 2 && !self.remote_branch(&row) {
                 return;
             }
-            (self.root.clone(), row.value.into_os_string())
+            let prefix = match self.subview {
+                0 => "refs/heads",
+                2 => "refs/remotes",
+                _ => "refs/tags",
+            };
+            let Some(name) = row.value.to_str() else {
+                return;
+            };
+            (self.root.clone(), format!("{prefix}/{name}").into())
         } else {
             return;
         };

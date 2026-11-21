@@ -211,10 +211,9 @@ impl GitScreen {
     fn undo_form(&mut self, redo: bool) -> Result<(), String> {
         self.allow_write()?;
         let undo = history::undo(&self.root, redo)?;
-        let (from, to) = undo.head();
         let fields = vec![
             read_only(if redo { "Redoes" } else { "Undoes" }, undo.entry.clone()),
-            read_only("HEAD", format!("{from} → {to}")),
+            read_only("HEAD", undo.head_change()),
             read_only("Runs", undo.run().display()),
         ];
         let title = if redo {
@@ -243,8 +242,7 @@ impl GitScreen {
         Ok(())
     }
 
-    fn history_form(&mut self, edit: Edit) -> Result<(), String> {
-        self.allow_write()?;
+    pub(super) fn history_reference(&self) -> Result<&str, String> {
         if self.history_loading
             || self
                 .history_target
@@ -253,6 +251,24 @@ impl GitScreen {
         {
             return Err("Open the selected repository and wait for its history".into());
         }
+        Ok(self
+            .history_target
+            .as_ref()
+            .and_then(|(_, reference)| reference.to_str())
+            .unwrap_or("HEAD"))
+    }
+
+    pub(super) fn history_rewrite_hints(&self) -> bool {
+        !self.branch.is_empty()
+            && self.branch != "detached HEAD"
+            && self.history_reference().is_ok_and(|reference| {
+                reference == "HEAD" || reference.strip_prefix("refs/heads/") == Some(&self.branch)
+            })
+    }
+
+    fn history_form(&mut self, edit: Edit) -> Result<(), String> {
+        self.allow_write()?;
+        let reference = self.history_reference()?;
         let target = self
             .selected_row()
             .and_then(|row| {
@@ -261,7 +277,7 @@ impl GitScreen {
                     .and_then(|id| git2::Oid::from_str(id).ok())
             })
             .ok_or("Select a history commit")?;
-        let plan = history::rewrite(&self.root, target, edit.clone())?;
+        let plan = history::rewrite(&self.root, reference, target, edit.clone())?;
         let mut fields = Vec::new();
         if matches!(edit, Edit::Reword(_)) {
             let message = git2::Repository::open(&self.root)
@@ -302,7 +318,13 @@ impl GitScreen {
             "Runs",
             runs.last().map(Run::display).unwrap_or_default(),
         ));
-        let title = format!("{} · {}?", edit.title(), history::short(target));
+        let branch = history::ref_label(&plan.reference);
+        let id = history::short(target);
+        let title = if edit == Edit::Drop {
+            format!("Drop {id} from {branch}?")
+        } else {
+            format!("{} · {id} on {branch}?", edit.title())
+        };
         // A reword starts in its message; every other sheet on its confirm button.
         let selected = if matches!(edit, Edit::Reword(_)) {
             0
@@ -354,7 +376,8 @@ impl GitScreen {
                     }
                     *message = text.to_owned();
                 }
-                let fresh = history::rewrite(&self.root, plan.target, plan.edit.clone())?;
+                let fresh =
+                    history::rewrite(&self.root, &plan.reference, plan.target, plan.edit.clone())?;
                 if fresh.todo != plan.todo {
                     return Err("The branch changed; cancel and press the key again".into());
                 }

@@ -24,15 +24,6 @@ impl GitScreen {
                     self.notice = "Select a history commit for the fixup".into();
                     return true;
                 };
-                if self.history_loading
-                    || self
-                        .history_target
-                        .as_ref()
-                        .is_some_and(|(root, _)| root != &self.root)
-                {
-                    self.notice = "Open the selected repository and wait for its history".into();
-                    return true;
-                }
                 Kind::Fixup(target)
             }
             _ => return false,
@@ -44,7 +35,18 @@ impl GitScreen {
 
     fn rewrite_form(&mut self, kind: Kind) -> Result<(), String> {
         self.allow_write()?;
+        let history_branch = if self.last_list == 2 && self.history_view == 0 {
+            Some(crate::history::history_branch(
+                &self.root,
+                self.history_reference()?,
+            )?)
+        } else {
+            None
+        };
         let plan = Plan::capture(&self.root, kind)?;
+        if history_branch.is_some() && plan.reference != history_branch {
+            return Err("The checked-out branch changed. Close this and open it again.".into());
+        }
         let title = match kind {
             Kind::Amend => "Amend HEAD",
             Kind::Reword => "Reword HEAD",

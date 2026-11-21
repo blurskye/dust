@@ -194,7 +194,12 @@ pub enum Move {
     /// A commit, reset, pull, merge or a whole rebase: HEAD went from one commit to another.
     Commit { from: Oid, to: Oid },
     /// A branch switch: from one branch (or detached commit) to another.
-    Checkout { from: String, to: String },
+    Checkout {
+        from: String,
+        from_id: Oid,
+        to: String,
+        to_id: Oid,
+    },
 }
 
 /// `z` or `Z`: the reflog action to reverse (or replay) and how.
@@ -211,9 +216,19 @@ impl Undo {
     pub fn head(&self) -> (String, String) {
         let (from, to) = match &self.moved {
             Move::Commit { from, to } => (short(*from), short(*to)),
-            Move::Checkout { from, to } => (from.clone(), to.clone()),
+            Move::Checkout { from, to, .. } => (from.clone(), to.clone()),
         };
         if self.redo { (from, to) } else { (to, from) }
+    }
+
+    pub(crate) fn head_change(&self) -> String {
+        let (from, to) = self.head();
+        if let Move::Checkout { from_id, to_id, .. } = self.moved {
+            let target_id = if self.redo { to_id } else { from_id };
+            format!("{from} → {to} ({})", short(target_id))
+        } else {
+            format!("{from} → {to}")
+        }
     }
 
     /// Builds the command for display or execution after rechecking the plan with `undo`.
@@ -226,9 +241,14 @@ impl Undo {
                 let target = if self.redo { to } else { from };
                 Run::new(["reset".into(), "--keep".into(), target.to_string()])
             }
-            Move::Checkout { from, to } => {
+            Move::Checkout { from, to, .. } => {
                 let target = if self.redo { to } else { from };
-                Run::new(["checkout".into(), target.clone(), "--".into()])
+                Run::new([
+                    "checkout".into(),
+                    "--no-guess".into(),
+                    target.clone(),
+                    "--".into(),
+                ])
             }
         };
         run.with("GIT_REFLOG_ACTION", action)
@@ -377,7 +397,9 @@ pub fn undo(root: &Path, redo: bool) -> Result<Undo, String> {
         } else if let Some(rest) = message.strip_prefix("checkout: moving from ") {
             rest.split_once(" to ").map(|(from, to)| Move::Checkout {
                 from: from.to_owned(),
+                from_id: old,
                 to: to.trim_end().to_owned(),
+                to_id: new,
             })
         } else if message == crate::rewrite::REFLOG_ACTION
             || [
@@ -398,7 +420,12 @@ pub fn undo(root: &Path, redo: bool) -> Result<Undo, String> {
         let Some(moved) = moved else { continue };
         let noop = match &moved {
             Move::Commit { from, to } => from == to,
-            Move::Checkout { from, to } => from == to,
+            Move::Checkout {
+                from,
+                from_id,
+                to,
+                to_id,
+            } => from == to && from_id == to_id,
         };
         if noop {
             continue;
@@ -417,15 +444,51 @@ pub fn undo(root: &Path, redo: bool) -> Result<Undo, String> {
                 entry: message.trim_end().to_owned(),
                 moved,
             };
-            if let Move::Commit { from, to } = undo.moved {
-                let expected_head = if redo { from } else { to };
-                if repository.head().ok().and_then(|head| head.target()) != Some(expected_head) {
-                    return Err("Undo can't follow the last change to HEAD.".into());
+            let head = repository.head().ok().and_then(|head| head.target());
+            let unexpected_head = "Undo can't follow the last change to HEAD.";
+            match &undo.moved {
+                Move::Commit { from, to } => {
+                    let expected_head = if redo { *from } else { *to };
+                    if head != Some(expected_head) {
+                        return Err(unexpected_head.into());
+                    }
+                    if !redo && from.is_zero() {
+                        return Err("The first commit has nothing before it to return to".into());
+                    }
+                    check_staged(&repository, expected_head)?;
                 }
-                if !redo && from.is_zero() {
-                    return Err("The first commit has nothing before it to return to".into());
+                Move::Checkout {
+                    from,
+                    from_id,
+                    to,
+                    to_id,
+                } => {
+                    let ((source, source_id), (target, target_id)) = if redo {
+                        ((from, *from_id), (to, *to_id))
+                    } else {
+                        ((to, *to_id), (from, *from_id))
+                    };
+                    if head != Some(source_id)
+                        || branch(&repository)?.is_some_and(|current| &current != source)
+                    {
+                        return Err(unexpected_head.into());
+                    }
+                    // Checkout prefers the local branch over a same-named tag. A
+                    // detached checkout can instead be recorded as a commit or tag.
+                    let actual = match repository.find_branch(target, git2::BranchType::Local) {
+                        Ok(branch) => branch.get().peel_to_commit().map(|commit| commit.id()),
+                        Err(error) if error.code() == git2::ErrorCode::NotFound => repository
+                            .revparse_single(target)
+                            .and_then(|object| object.peel_to_commit())
+                            .map(|commit| commit.id()),
+                        Err(error) => Err(error),
+                    };
+                    if actual.ok() != Some(target_id) {
+                        return Err(format!(
+                            "{target} has moved since you left it. Check it out from Branches instead."
+                        ));
+                    }
                 }
-                check_staged(&repository, expected_head)?;
             }
             return Ok(undo);
         }
@@ -480,6 +543,8 @@ impl Edit {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Rewrite {
     pub edit: Edit,
+    /// The full local branch ref approved for the rebase.
+    pub reference: String,
     pub target: Oid,
     /// `1a2b3c4 subject` of the selected commit.
     pub commit: String,
@@ -497,13 +562,43 @@ fn line(commit: &git2::Commit) -> String {
     format!("{} {}", short(commit.id()), summary(commit))
 }
 
-/// Plans `edit` on `target`, which must be on HEAD's first-parent line with no merge
-/// commit between it and HEAD.
-pub fn rewrite(root: &Path, target: Oid, edit: Edit) -> Result<Rewrite, String> {
+/// The label for an exact ref selected in the History pane.
+pub(crate) fn ref_label(reference: &str) -> &str {
+    ["refs/heads/", "refs/remotes/", "refs/tags/"]
+        .into_iter()
+        .find_map(|prefix| reference.strip_prefix(prefix))
+        .unwrap_or(reference)
+}
+
+fn checked_out_history_branch(repository: &Repository, reference: &str) -> Result<String, String> {
+    let head = repository.find_reference("HEAD").map_err(failed)?;
+    let checked_out = head
+        .symbolic_target()
+        .filter(|name| name.starts_with("refs/heads/"));
+    if let Some(name) = checked_out
+        && (reference == "HEAD" || name == reference)
+    {
+        return Ok(name.to_owned());
+    }
+    if let Some(branch) = reference.strip_prefix("refs/heads/") {
+        Err(format!("Check out {branch} to change its history."))
+    } else {
+        Err("Check out a local branch to change its history.".into())
+    }
+}
+
+pub(crate) fn history_branch(root: &Path, reference: &str) -> Result<String, String> {
+    checked_out_history_branch(&open(root)?, reference)
+}
+
+/// Plans `edit` on `target` in the displayed history. The reference must be the
+/// checked-out branch (or `HEAD` for default History), with no merges in the rewrite.
+pub fn rewrite(root: &Path, reference: &str, target: Oid, edit: Edit) -> Result<Rewrite, String> {
     let repository = open(root)?;
     settled(&repository)?;
+    let reference = checked_out_history_branch(&repository, reference)?;
     let head = repository
-        .head()
+        .find_reference(&reference)
         .and_then(|head| head.peel_to_commit())
         .map_err(|_| "The branch has no commits yet")?;
     // Newest first, HEAD down to the target.
@@ -548,9 +643,8 @@ pub fn rewrite(root: &Path, target: Oid, edit: Edit) -> Result<Rewrite, String> 
         return Err("The newest commit has no commit above it".into());
     }
     if edit == Edit::Amend {
-        let staged = repository
-            .head()
-            .and_then(|head| head.peel_to_tree())
+        let staged = chain[0]
+            .tree()
             .and_then(|tree| repository.diff_tree_to_index(Some(&tree), None, None))
             .map_err(failed)?;
         if staged.deltas().count() == 0 {
@@ -596,6 +690,7 @@ pub fn rewrite(root: &Path, target: Oid, edit: Edit) -> Result<Rewrite, String> 
     Ok(Rewrite {
         commit: line(selected),
         edit,
+        reference,
         target,
         other,
         base,
@@ -938,14 +1033,16 @@ mod tests {
     fn undo_switches_back_and_treats_a_rebase_as_one_action() {
         let dir = repo();
         let root = dir.path();
-        commit(root, "a");
+        let a = commit(root, "a");
         git(root, &["switch", "-q", "-c", "topic"]);
         let undo_switch = undo(root, false).unwrap();
         assert_eq!(
             undo_switch.moved,
             Move::Checkout {
                 from: "main".into(),
-                to: "topic".into()
+                from_id: a,
+                to: "topic".into(),
+                to_id: a,
             }
         );
         run(root, &undo_switch.run());
@@ -954,7 +1051,7 @@ mod tests {
         assert_eq!(git(root, &["branch", "--show-current"]), "topic");
         commit(root, "b");
         let before = commit(root, "c");
-        let plan = rewrite(root, before, Edit::MoveDown).unwrap();
+        let plan = rewrite(root, "refs/heads/topic", before, Edit::MoveDown).unwrap();
         for step in plan.runs() {
             run(root, &step);
         }
@@ -964,6 +1061,74 @@ mod tests {
         run(root, &rebase.run());
         assert_eq!(head(root), before);
         assert_eq!(subjects(root), "c b a");
+    }
+
+    #[test]
+    fn checkout_undo_and_redo_require_the_recorded_branch_tips() {
+        let dir = repo();
+        let root = dir.path();
+        let base = commit(root, "a");
+        git(root, &["branch", "topic"]);
+        let main = commit(root, "b");
+        git(root, &["switch", "-q", "topic"]);
+
+        git(root, &["branch", "-f", "main", &base.to_string()]);
+        assert_eq!(
+            undo(root, false).unwrap_err(),
+            "main has moved since you left it. Check it out from Branches instead."
+        );
+        assert_eq!(head(root), base);
+        assert_eq!(git(root, &["branch", "--show-current"]), "topic");
+
+        git(root, &["branch", "-f", "main", &main.to_string()]);
+        let plan = undo(root, false).unwrap();
+        assert_eq!(
+            plan.head_change(),
+            format!("topic → main ({})", short(main))
+        );
+        run(root, &plan.run());
+        assert_eq!(head(root), main);
+        assert_eq!(git(root, &["branch", "--show-current"]), "main");
+
+        git(root, &["branch", "-f", "topic", &main.to_string()]);
+        assert_eq!(
+            undo(root, true).unwrap_err(),
+            "topic has moved since you left it. Check it out from Branches instead."
+        );
+        assert_eq!(head(root), main);
+        git(root, &["branch", "-f", "topic", &base.to_string()]);
+        run(root, &undo(root, true).unwrap().run());
+        assert_eq!(head(root), base);
+        assert_eq!(git(root, &["branch", "--show-current"]), "topic");
+    }
+
+    #[test]
+    fn dropping_a_commit_requires_the_displayed_branch_to_be_checked_out() {
+        let dir = repo();
+        let root = dir.path();
+        commit(root, "a");
+        let lower = commit(root, "b");
+        git(root, &["branch", "lower"]);
+        let main = commit(root, "c");
+
+        assert_eq!(
+            rewrite(root, "refs/heads/lower", lower, Edit::Drop).unwrap_err(),
+            "Check out lower to change its history."
+        );
+        assert_eq!(
+            git(root, &["rev-parse", "refs/heads/main"]),
+            main.to_string()
+        );
+
+        let plan = rewrite(root, "refs/heads/main", lower, Edit::Drop).unwrap();
+        for command in plan.runs() {
+            run(root, &command);
+        }
+        assert_eq!(subjects(root), "c a");
+        assert_eq!(
+            git(root, &["rev-parse", "refs/heads/lower"]),
+            lower.to_string()
+        );
     }
 
     #[test]
@@ -984,7 +1149,7 @@ mod tests {
         let start = head(root);
         for (edit, expected) in cases {
             git(root, &["reset", "-q", "--hard", &start.to_string()]);
-            let plan = rewrite(root, b, edit.clone()).unwrap();
+            let plan = rewrite(root, "refs/heads/main", b, edit.clone()).unwrap();
             for step in plan.runs() {
                 run(root, &step);
             }
@@ -998,14 +1163,14 @@ mod tests {
         fs::write(root.join("a"), "amended\n").unwrap();
         git(root, &["add", "a"]);
         fs::write(root.join("c"), "unstaged\n").unwrap();
-        let plan = rewrite(root, b, Edit::Amend).unwrap();
+        let plan = rewrite(root, "refs/heads/main", b, Edit::Amend).unwrap();
         for step in plan.runs() {
             run(root, &step);
         }
         assert_eq!(subjects(root), "c b a");
         assert_eq!(git(root, &["show", "HEAD~1:a"]), "amended");
         assert_eq!(fs::read_to_string(root.join("c")).unwrap(), "unstaged\n");
-        assert!(rewrite(root, head(root), Edit::MoveUp).is_err());
+        assert!(rewrite(root, "refs/heads/main", head(root), Edit::MoveUp).is_err());
     }
 
     #[test]
@@ -1014,15 +1179,19 @@ mod tests {
         let root = dir.path();
         let a = commit(root, "a");
         let b = commit(root, "b");
-        let plan = rewrite(root, b, Edit::Squash).unwrap();
+        let plan = rewrite(root, "refs/heads/main", b, Edit::Squash).unwrap();
         assert_eq!(plan.base, None);
         assert!(plan.runs()[0].args.contains(&OsString::from("--root")));
-        assert!(rewrite(root, a, Edit::Squash).is_err());
+        assert!(rewrite(root, "refs/heads/main", a, Edit::Squash).is_err());
         git(root, &["switch", "-q", "-c", "side", &a.to_string()]);
         commit(root, "side");
         git(root, &["switch", "-q", "main"]);
         git(root, &["merge", "-q", "--no-ff", "-m", "merge", "side"]);
-        assert!(rewrite(root, b, Edit::Drop).unwrap_err().contains("merge"));
+        assert!(
+            rewrite(root, "refs/heads/main", b, Edit::Drop)
+                .unwrap_err()
+                .contains("merge")
+        );
     }
 
     #[test]

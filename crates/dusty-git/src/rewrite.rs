@@ -116,7 +116,7 @@ impl Plan {
     fn validate(&self, repo: &Repository) -> Result<(), String> {
         ready(repo)?;
         if repo.path() != self.gitdir || identity(repo)? != (self.head, self.reference.clone()) {
-            return Err("HEAD or its branch changed; cancel and reopen this action".into());
+            return Err("The checked-out branch changed. Close this and open it again.".into());
         }
         let bytes = fs::read(&self.index_path).map_err(error)?;
         if <[u8; 32]>::from(Sha256::digest(&bytes)) != self.index_hash {
