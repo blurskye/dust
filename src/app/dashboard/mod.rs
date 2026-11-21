@@ -268,9 +268,24 @@ impl App {
 
     /// The boxes the dashboard shows at its current size.
     pub(in crate::app) fn dashboard_panels(&self) -> &'static [DashboardPanel] {
-        let (width, height) = crate::ui::render::dashboard_size(&self.ui)
-            .unwrap_or((self.window_session.width(), self.window_session.height()));
+        let (width, height) = self.dashboard_size();
         crate::ui::render::dashboard_panels(width, height)
+    }
+
+    fn dashboard_size(&self) -> (u16, u16) {
+        crate::ui::render::dashboard_size(&self.ui)
+            .unwrap_or((self.window_session.width(), self.window_session.height()))
+    }
+
+    fn start_grid(&self) -> Option<(crate::windows::WindowRect, usize)> {
+        let (width, height) = self.dashboard_size();
+        crate::ui::render::dashboard_start_grid(
+            &self.ui,
+            self.configuration.dashboard(),
+            self.configuration.settings(),
+            width,
+            height,
+        )
     }
 
     /// Opens the `index`th recent file, first switching to its project when that is not open.

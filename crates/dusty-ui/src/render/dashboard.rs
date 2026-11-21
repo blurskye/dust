@@ -18,6 +18,7 @@ use crate::grid::ZERO_WIDTH_REPLACEMENT;
 use crate::render::DashboardPanel;
 use crate::render::UiState;
 use crate::render::overlays::truncate_content_title;
+use crate::windows::WindowRect;
 use std::path::Path;
 
 /// The smallest window that fits the four boxes.
@@ -40,8 +41,8 @@ const ALL_PANELS: [DashboardPanel; 4] = [
     DashboardPanel::Projects,
     DashboardPanel::Start,
 ];
-/// D, U, S and T on a five-by-eight grid. Each pair of rows becomes one row of half blocks.
-const WORDMARK_LETTERS: [[&str; 8]; 4] = [
+/// D, U, S, T and Y on a five-by-eight grid. Each pair of rows becomes one row of half blocks.
+const WORDMARK_LETTERS: [[&str; 8]; 5] = [
     [
         "11110", "10001", "10001", "10001", "10001", "10001", "10001", "11110",
     ],
@@ -53,6 +54,9 @@ const WORDMARK_LETTERS: [[&str; 8]; 4] = [
     ],
     [
         "11111", "00100", "00100", "00100", "00100", "00100", "00100", "00100",
+    ],
+    [
+        "10001", "10001", "01010", "00100", "00100", "00100", "00100", "00100",
     ],
 ];
 
@@ -135,7 +139,7 @@ pub(super) fn render_dashboard(
         );
         return Frame { grid, cursor: None };
     }
-    let shown = dashboard_panels(width, height);
+    let layout = DashboardLayout::new(ui, configured, ambiguous, width, height);
     let mut screen = Screen {
         grid,
         ui,
@@ -143,33 +147,19 @@ pub(super) fn render_dashboard(
         configured,
         ambiguous,
         icons: editor_config.ui.explorer.icon_mode == ExplorerIconMode::NerdFont,
-        focus: dashboard_focus(ui, shown),
+        focus: dashboard_focus(ui, layout.shown),
+        actions: layout.actions,
     };
-    let block = configured.content_width.max(GRID_MIN_WIDTH).min(width);
-    let left = (width - block) / 2;
-    let hints = height >= HINTS_MIN_HEIGHT;
-    // The boxes end above a blank row and the hints.
-    let bottom = if hints { height - 2 } else { height };
-    let boxes = if shown.len() == ALL_PANELS.len() {
-        let top = screen.draw_header(left, block, height);
-        grid_boxes(left + MARGIN, block - 2 * MARGIN, top, bottom)
+    if layout.shown.len() == ALL_PANELS.len() {
+        screen.draw_header(layout.left, layout.block, layout.logo);
     } else {
-        let margin = if block >= 40 { MARGIN } else { 0 };
-        screen.draw_header_line(left + margin, left + block - margin);
-        let start_height = screen.start_rows(block - 2 * margin).saturating_add(3);
-        column_boxes(
-            shown,
-            left + margin,
-            block - 2 * margin,
-            start_height,
-            2,
-            bottom,
-        )
-    };
-    for (panel, rect) in boxes {
+        let margin = column_margin(layout.block);
+        screen.draw_header_line(layout.left + margin, layout.left + layout.block - margin);
+    }
+    for (panel, rect) in layout.boxes {
         screen.draw_panel(panel, rect);
     }
-    if hints {
+    if height >= HINTS_MIN_HEIGHT {
         let y = height - 1;
         for x in 0..width {
             screen.grid.set_cell(x, y, " ", Style::StatusMuted);
@@ -184,12 +174,160 @@ pub(super) fn render_dashboard(
     }
 }
 
+/// The action area relative to the dashboard and the number of columns drawn in it.
+pub fn dashboard_start_grid(
+    ui: &UiState,
+    configured: &DashboardConfig,
+    config: &Config,
+    width: u16,
+    height: u16,
+) -> Option<(WindowRect, usize)> {
+    if width < configured.minimum_width || height < configured.minimum_height {
+        return None;
+    }
+    let layout = DashboardLayout::new(ui, configured, config.editor.ambiguous_width, width, height);
+    let (_, start) = layout
+        .boxes
+        .iter()
+        .find(|(panel, _)| *panel == DashboardPanel::Start)?;
+    if start.width < 8 || start.height < 3 {
+        return None;
+    }
+    let content = start.content();
+    let rect = WindowRect {
+        x: content.x,
+        y: content.y,
+        width: content.right - content.x + 1,
+        height: content.rows,
+    };
+    Some((rect, usize::from(layout.actions.columns(start.width))))
+}
+
+struct DashboardLayout {
+    shown: &'static [DashboardPanel],
+    left: u16,
+    block: u16,
+    logo: Option<HeaderLogo>,
+    boxes: Vec<(DashboardPanel, Rect)>,
+    actions: ActionWidths,
+}
+
+impl DashboardLayout {
+    fn new(
+        ui: &UiState,
+        configured: &DashboardConfig,
+        ambiguous: AmbiguousWidth,
+        width: u16,
+        height: u16,
+    ) -> Self {
+        let shown = dashboard_panels(width, height);
+        let block = configured.content_width.max(GRID_MIN_WIDTH).min(width);
+        let left = (width - block) / 2;
+        let actions = ActionWidths::new(ui, ambiguous);
+        // The boxes end above a blank row and the hints.
+        let bottom = if height >= HINTS_MIN_HEIGHT {
+            height - 2
+        } else {
+            height
+        };
+        let (logo, boxes) = if shown.len() == ALL_PANELS.len() {
+            let logo = HeaderLogo::fit(configured, ambiguous, block, height);
+            let top = logo
+                .as_ref()
+                .map_or(5, |logo| logo.lines.len().max(5) as u16 + 2);
+            (
+                logo,
+                grid_boxes(left + MARGIN, block - 2 * MARGIN, top, bottom),
+            )
+        } else {
+            let margin = column_margin(block);
+            let box_width = block - 2 * margin;
+            let start_height = actions
+                .count
+                .div_ceil(actions.columns(box_width))
+                .saturating_add(3);
+            (
+                None,
+                column_boxes(shown, left + margin, box_width, start_height, 2, bottom),
+            )
+        };
+        Self {
+            shown,
+            left,
+            block,
+            logo,
+            boxes,
+            actions,
+        }
+    }
+}
+
+fn column_margin(block: u16) -> u16 {
+    if block >= 40 { MARGIN } else { 0 }
+}
+
+struct HeaderLogo {
+    lines: Vec<String>,
+    info_offset: u16,
+}
+
+impl HeaderLogo {
+    fn fit(
+        configured: &DashboardConfig,
+        ambiguous: AmbiguousWidth,
+        block: u16,
+        height: u16,
+    ) -> Option<Self> {
+        if height < WORDMARK_MIN_HEIGHT {
+            return None;
+        }
+        let lines = if configured.logo.trim().is_empty() {
+            wordmark()
+        } else {
+            configured.logo.lines().map(str::to_owned).collect()
+        };
+        let art_width = lines
+            .iter()
+            .map(|line| display_width(line, ambiguous))
+            .max()
+            .unwrap_or(0);
+        // Leave room for the repository and version, tightening the gap at 100 columns.
+        let gap = block
+            .saturating_sub(4 * MARGIN + 30)
+            .saturating_sub(art_width)
+            .min(8);
+        (lines.len() <= 6 && gap >= 4).then_some(Self {
+            lines,
+            info_offset: art_width.saturating_add(gap),
+        })
+    }
+}
+
+fn display_width(text: &str, ambiguous: AmbiguousWidth) -> u16 {
+    u16::try_from(text_width(text, ambiguous)).unwrap_or(u16::MAX)
+}
+
 #[derive(Clone, Copy, Debug)]
 struct Rect {
     x: u16,
     y: u16,
     width: u16,
     height: u16,
+}
+
+impl Rect {
+    fn content(self) -> Content {
+        // A blank row under the title when the box has room for it.
+        let gap = u16::from(self.height >= 6);
+        Content {
+            fill_left: self.x + 1,
+            fill_right: self.x + self.width - 1,
+            x: self.x + 2,
+            right: self.x + self.width - 2,
+            y: self.y + 1 + gap,
+            rows: self.height.saturating_sub(2 + gap),
+        }
+    }
 }
 
 /// Two boxes over two, splitting the room evenly with a gap between them.
@@ -261,6 +399,50 @@ struct Content {
     rows: u16,
 }
 
+struct ActionWidths {
+    count: u16,
+    key: u16,
+    icon: u16,
+    label: u16,
+}
+
+impl ActionWidths {
+    fn new(ui: &UiState, ambiguous: AmbiguousWidth) -> Self {
+        let mut widths = Self {
+            count: u16::try_from(ui.dashboard_actions.len()).unwrap_or(u16::MAX),
+            key: 0,
+            icon: 0,
+            label: 0,
+        };
+        for action in &ui.dashboard_actions {
+            if let Some(key) = &action.key {
+                widths.key = widths
+                    .key
+                    .max(display_width(key, ambiguous).saturating_add(KEY_GAP));
+            }
+            if !action.icon.is_empty() {
+                widths.icon = widths
+                    .icon
+                    .max(display_width(&action.icon, ambiguous).saturating_add(1));
+            }
+            widths.label = widths.label.max(display_width(&action.label, ambiguous));
+        }
+        widths
+    }
+
+    /// How many columns fit in the Start box. No gap is needed after the last one.
+    fn columns(&self, width: u16) -> u16 {
+        let pitch = self
+            .key
+            .saturating_add(self.icon)
+            .saturating_add(self.label)
+            .saturating_add(KEY_GAP);
+        ((width.saturating_sub(4) + KEY_GAP) / pitch)
+            .clamp(1, 3)
+            .min(self.count.max(1))
+    }
+}
+
 struct Screen<'a> {
     grid: CellGrid,
     ui: &'a UiState,
@@ -269,39 +451,29 @@ struct Screen<'a> {
     ambiguous: AmbiguousWidth,
     icons: bool,
     focus: DashboardPanel,
+    actions: ActionWidths,
 }
 
 impl Screen<'_> {
     fn width(&self, text: &str) -> u16 {
-        u16::try_from(text_width(text, self.ambiguous)).unwrap_or(u16::MAX)
+        display_width(text, self.ambiguous)
     }
 
     fn put(&mut self, x: u16, y: u16, text: &str, style: Style, right: u16) -> u16 {
         self.grid.put_text_clipped(x, y, text, style, right)
     }
 
-    /// The wordmark (or the configured logo) with the workspace beside it when the window is
-    /// tall and wide enough, otherwise the same facts as text. Returns the row the boxes
-    /// start on.
-    fn draw_header(&mut self, left: u16, block: u16, height: u16) -> u16 {
-        let art = if self.configured.logo.trim().is_empty() {
-            wordmark()
-        } else {
-            self.configured.logo.lines().map(str::to_owned).collect()
-        };
-        let art_rows = u16::try_from(art.len()).unwrap_or(u16::MAX);
-        let art_width = art.iter().map(|line| self.width(line)).max().unwrap_or(0);
+    /// The logo with the workspace beside it when it fits, otherwise the same facts as text.
+    fn draw_header(&mut self, left: u16, block: u16, logo: Option<HeaderLogo>) {
         let x = left + 2 * MARGIN;
         let right = left + block - 2 * MARGIN;
-        let info_x = x.saturating_add(art_width).saturating_add(8);
-        let with_art =
-            height >= WORDMARK_MIN_HEIGHT && art_rows <= 6 && info_x.saturating_add(30) <= right;
         let version = self
             .configured
             .version_format
             .replace("{version}", env!("CARGO_PKG_VERSION"));
-        if with_art {
-            for (row, line) in (1..).zip(&art) {
+        if let Some(logo) = logo {
+            let info_x = x + logo.info_offset;
+            for (row, line) in (1..).zip(&logo.lines) {
                 self.put(x, row, line, Style::Accent, right);
             }
             let mut name_right = right;
@@ -312,7 +484,7 @@ impl Screen<'_> {
             self.draw_workspace_line(info_x, 2, name_right.saturating_sub(2));
             self.draw_path(info_x, 3, right);
             self.draw_last_commit(info_x, 5, right);
-            return art_rows.max(5) + 2;
+            return;
         }
         let mut name_right = right;
         let mut identity = String::new();
@@ -332,7 +504,6 @@ impl Screen<'_> {
         self.draw_workspace_line(x, 1, name_right.saturating_sub(2));
         self.draw_path(x, 2, right);
         self.draw_last_commit(x, 3, right);
-        5
     }
 
     /// The workspace's name, its branch and how many files differ from it.
@@ -361,7 +532,11 @@ impl Screen<'_> {
         if parts.is_empty() {
             parts.push(("clean".to_owned(), Style::Muted));
         }
+        // A summary that doesn't fit whole is left out; the changes box lists the same files.
         for (summary, style) in parts {
+            if x.saturating_add(3).saturating_add(self.width(&summary)) > right {
+                break;
+            }
             x = self.put(x, y, " · ", Style::Muted, right);
             x = self.put(x, y, &summary, style, right);
         }
@@ -458,16 +633,7 @@ impl Screen<'_> {
                 self.put(hint_x, rect.y, &hint, Style::Muted, right);
             }
         }
-        // A blank row under the title when the box has room for it.
-        let gap = u16::from(rect.height >= 6);
-        Content {
-            fill_left: rect.x + 1,
-            fill_right: right,
-            x: rect.x + 2,
-            right: right - 1,
-            y: rect.y + 1 + gap,
-            rows: rect.height.saturating_sub(2 + gap),
-        }
+        rect.content()
     }
 
     fn draw_panel(&mut self, panel: DashboardPanel, rect: Rect) {
@@ -523,7 +689,7 @@ impl Screen<'_> {
             }
             DashboardPanel::Start => {
                 let content = self.draw_box(rect, "Start", "", focused);
-                self.draw_actions(&content, selected);
+                self.draw_actions(&content, self.actions.columns(rect.width), selected);
             }
         }
     }
@@ -655,57 +821,11 @@ impl Screen<'_> {
         self.put(path_x, y, &path, tone(Style::Muted, selected), path_right);
     }
 
-    /// How many columns of actions fit in `width`, at most three. Columns are `KEY_GAP` apart;
-    /// the last needs no gap after it.
-    fn start_columns(&self, width: u16) -> u16 {
-        let ui = self.ui;
-        let actions = &ui.dashboard_actions;
-        let item = self.key_width()
-            + self.icon_width()
-            + actions
-                .iter()
-                .map(|action| self.width(&action.label))
-                .max()
-                .unwrap_or(0)
-            + KEY_GAP;
-        let count = u16::try_from(actions.len()).unwrap_or(u16::MAX);
-        ((width.saturating_sub(4) + KEY_GAP) / item.max(1))
-            .clamp(1, 3)
-            .min(count.max(1))
-    }
-
-    /// The rows the actions take in a box `width` columns wide.
-    fn start_rows(&self, width: u16) -> u16 {
-        let count = u16::try_from(self.ui.dashboard_actions.len()).unwrap_or(u16::MAX);
-        count.div_ceil(self.start_columns(width))
-    }
-
-    fn key_width(&self) -> u16 {
-        self.ui
-            .dashboard_actions
-            .iter()
-            .filter_map(|action| action.key.as_deref())
-            .map(|key| self.width(key))
-            .max()
-            .map_or(0, |width| width + KEY_GAP)
-    }
-
-    fn icon_width(&self) -> u16 {
-        self.ui
-            .dashboard_actions
-            .iter()
-            .filter(|action| !action.icon.is_empty())
-            .map(|action| self.width(&action.icon) + 1)
-            .max()
-            .unwrap_or(0)
-    }
-
     /// The actions in rows of up to three, each key before its label.
-    fn draw_actions(&mut self, content: &Content, selected: Option<usize>) {
-        let columns = self.start_columns(content.right.saturating_sub(content.x) + 4);
+    fn draw_actions(&mut self, content: &Content, columns: u16, selected: Option<usize>) {
         let pitch = (content.right.saturating_sub(content.x) + 1) / columns;
-        let key_width = self.key_width();
-        let icon_width = self.icon_width();
+        let key_width = self.actions.key;
+        let icon_width = self.actions.icon;
         let rows = self
             .ui
             .dashboard_actions
@@ -860,10 +980,10 @@ mod tests {
         assert_eq!(
             wordmark(),
             [
-                "██▀▀▀▀▀▀▄▄  ██      ██  ▄▄▀▀▀▀▀▀▀▀  ▀▀▀▀██▀▀▀▀",
-                "██      ██  ██      ██  ▀▀▄▄▄▄▄▄        ██",
-                "██      ██  ██      ██          ██      ██",
-                "██▄▄▄▄▄▄▀▀  ▀▀▄▄▄▄▄▄▀▀  ▄▄▄▄▄▄▄▄▀▀      ██",
+                "██▀▀▀▀▀▀▄▄  ██      ██  ▄▄▀▀▀▀▀▀▀▀  ▀▀▀▀██▀▀▀▀  ██      ██",
+                "██      ██  ██      ██  ▀▀▄▄▄▄▄▄        ██        ▀▀▄▄▀▀",
+                "██      ██  ██      ██          ██      ██          ██",
+                "██▄▄▄▄▄▄▀▀  ▀▀▄▄▄▄▄▄▀▀  ▄▄▄▄▄▄▄▄▀▀      ██          ██",
             ]
         );
     }

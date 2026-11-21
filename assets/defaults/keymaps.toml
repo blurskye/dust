@@ -1831,7 +1831,7 @@ context = "dashboard"
 keys = "s"
 command = "session.load"
 
-# j and k move within the box, then move focus when there are no more items.
+# Plain motions move within the box and hand off to window focus at its edge.
 [[keymap]]
 id = "builtin.dashboard.surface.select-next.j"
 context = "dashboard"
@@ -1943,25 +1943,25 @@ context = "dashboard"
 keys = "ctrl-l"
 command = "surface.focus.right"
 [[keymap]]
-id = "builtin.dashboard.surface.surface-focus-left.h"
+id = "builtin.dashboard.surface.select-left.h"
 context = "dashboard"
 keys = "h"
-command = "surface.focus.left"
+command = "dashboard.select.left"
 [[keymap]]
-id = "builtin.dashboard.surface.surface-focus-left.left"
+id = "builtin.dashboard.surface.select-left.left"
 context = "dashboard"
 keys = "left"
-command = "surface.focus.left"
+command = "dashboard.select.left"
 [[keymap]]
-id = "builtin.dashboard.surface.surface-focus-right.l"
+id = "builtin.dashboard.surface.select-right.l"
 context = "dashboard"
 keys = "l"
-command = "surface.focus.right"
+command = "dashboard.select.right"
 [[keymap]]
-id = "builtin.dashboard.surface.surface-focus-right.right"
+id = "builtin.dashboard.surface.select-right.right"
 context = "dashboard"
 keys = "right"
-command = "surface.focus.right"
+command = "dashboard.select.right"
 
 # Command/search prompt controls.
 [[keymap]]

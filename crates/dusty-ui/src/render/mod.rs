@@ -42,6 +42,7 @@ pub use dashboard::dashboard_focus;
 pub use dashboard::dashboard_panels;
 pub use dashboard::dashboard_rows;
 pub use dashboard::dashboard_selected_row;
+pub use dashboard::dashboard_start_grid;
 use dashboard::render_dashboard;
 
 use documentation::render_documentation_popup;

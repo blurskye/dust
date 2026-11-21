@@ -337,16 +337,16 @@ fn a_large_dashboard_shows_the_wordmark_beside_the_workspace_over_four_boxes() {
     );
     assert!(rows[4].starts_with("    ██▄▄▄▄▄▄▀▀"), "{rows:#?}");
     assert_eq!(style(&frame, 4, 1), Style::Accent);
-    assert_eq!(column(&rows[2], "tally · "), 58);
+    assert_eq!(column(&rows[2], "tally · "), 70);
     for text in ["master", " · 1 changed · 1 new"] {
         assert!(rows[2].contains(text), "{}", rows[2]);
     }
     assert_eq!(rows[2].trim_end().chars().count(), 156);
     assert!(rows[2].trim_end().ends_with(&version()));
-    assert_eq!(column(&rows[3], "/work/tally"), 58);
+    assert_eq!(column(&rows[3], "/work/tally"), 70);
     assert_eq!(
         column(&rows[5], "last commit Count characters too 3h ago"),
-        58
+        70
     );
 
     // Recent files and changes on row 7, projects and the actions below them.
@@ -445,9 +445,22 @@ fn an_80_by_24_dashboard_shows_one_header_line_recent_files_and_the_actions() {
 #[test]
 fn shorter_windows_drop_the_wordmark_before_the_boxes() {
     let ui = workspace_ui();
-    // The pty smoke test's size still fits the wordmark.
-    let (_, rows) = draw(&ui, 100, 30);
-    assert!(rows[1].contains("██"), "{rows:#?}");
+    // At 100 columns the change summary doesn't fit whole, so it is left out, not cut.
+    for (width, height, info_x, summary) in [(120, 36, 70, true), (100, 30, 66, false)] {
+        let (_, rows) = draw(&ui, width, height);
+        assert!(rows[1].trim_end().ends_with("██      ██"), "{rows:#?}");
+        assert_eq!(column(&rows[2], "tally · "), info_x);
+        assert!(rows[2].contains("master"), "{}", rows[2]);
+        assert_eq!(
+            rows[2].contains("master · 1 changed"),
+            summary,
+            "{}",
+            rows[2]
+        );
+        assert_eq!(rows[2].contains(" · 1"), summary, "{}", rows[2]);
+        assert_eq!(column(&rows[3], "/work/tally"), info_x);
+        assert!(rows[2].trim_end().ends_with(&version()), "{rows:#?}");
+    }
     let (_, rows) = draw(&ui, 120, 24);
     assert!(!rows.iter().any(|row| row.contains("██")), "{rows:#?}");
     assert!(rows[1].starts_with("    tally · "), "{}", rows[1]);
@@ -542,7 +555,7 @@ fn the_changes_box_says_when_the_tree_is_clean_or_not_a_repository() {
     let (_, rows) = draw(&ui, 160, 39);
     assert_eq!(column(&rows[9], "Not a Git repository"), 83);
     // Without a branch or a status the name stands alone before the version.
-    assert_eq!(column(&rows[2], "tally"), 58);
+    assert_eq!(column(&rows[2], "tally"), 70);
     assert!(!rows[2].contains('·'), "{}", rows[2]);
 }
 

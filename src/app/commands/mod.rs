@@ -175,8 +175,8 @@ pub enum AppEffect {
     ExtendMouseSelection,
     Layout(LayoutAction),
     SurfaceFocus(SpatialDirection),
-    /// Moves the dashboard selection by this many rows, handing off to surface focus at the edge.
-    DashboardSelect(i8),
+    /// Moves the dashboard selection, handing off to surface focus at the edge.
+    DashboardSelect(SpatialDirection),
     /// Opens the selected item in the focused dashboard box.
     DashboardOpen,
     /// Opens the dashboard's recent file at this index.

@@ -294,12 +294,22 @@ pub(in crate::app) fn register_commands(
         (
             "dashboard.select.next",
             "Move to the next dashboard item",
-            AppEffect::DashboardSelect(1),
+            AppEffect::DashboardSelect(SpatialDirection::Down),
         ),
         (
             "dashboard.select.previous",
             "Move to the previous dashboard item",
-            AppEffect::DashboardSelect(-1),
+            AppEffect::DashboardSelect(SpatialDirection::Up),
+        ),
+        (
+            "dashboard.select.left",
+            "Move left on the dashboard",
+            AppEffect::DashboardSelect(SpatialDirection::Left),
+        ),
+        (
+            "dashboard.select.right",
+            "Move right on the dashboard",
+            AppEffect::DashboardSelect(SpatialDirection::Right),
         ),
         (
             "dashboard.open",

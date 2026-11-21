@@ -18,13 +18,9 @@ impl App {
     ) -> Result<(), AppEffect> {
         let panel = dashboard_focus(&self.ui, self.dashboard_panels());
         match effect {
-            AppEffect::DashboardSelect(step) => {
-                if !self.move_dashboard_selection(panel, step) {
-                    self.focus_surface(if step < 0 {
-                        SpatialDirection::Up
-                    } else {
-                        SpatialDirection::Down
-                    });
+            AppEffect::DashboardSelect(direction) => {
+                if !self.move_dashboard_selection(panel, direction) {
+                    self.focus_surface(direction);
                 }
             }
             AppEffect::DashboardOpenRecent(index) => self.open_dashboard_recent_file(index),
@@ -61,13 +57,29 @@ impl App {
         Ok(())
     }
 
-    fn move_dashboard_selection(&mut self, panel: DashboardPanel, step: i8) -> bool {
-        let last = dashboard_rows(&self.ui, panel).saturating_sub(1);
-        let row = dashboard_selected_row(&self.ui, panel);
-        let next = row.saturating_add_signed(isize::from(step)).min(last);
-        if row == next {
+    fn move_dashboard_selection(
+        &mut self,
+        panel: DashboardPanel,
+        direction: SpatialDirection,
+    ) -> bool {
+        let count = dashboard_rows(&self.ui, panel);
+        let index = dashboard_selected_row(&self.ui, panel);
+        let columns = if panel == DashboardPanel::Start {
+            self.start_grid().map_or(1, |(_, columns)| columns)
+        } else {
+            1
+        };
+        let column = index % columns;
+        let next = match direction {
+            SpatialDirection::Up => index.checked_sub(columns),
+            SpatialDirection::Down => index.checked_add(columns),
+            SpatialDirection::Left if column > 0 => index.checked_sub(1),
+            SpatialDirection::Right if column + 1 < columns => index.checked_add(1),
+            SpatialDirection::Left | SpatialDirection::Right => None,
+        };
+        let Some(next) = next.filter(|&next| next < count) else {
             return false;
-        }
+        };
         self.set_dashboard_row(panel, next);
         true
     }
@@ -101,7 +113,13 @@ impl App {
                 return false;
             };
             if dashboard_rows(&self.ui, target) > 0 {
-                self.land_in_dashboard_box(target, direction);
+                let across = match direction {
+                    SpatialDirection::Left | SpatialDirection::Right => {
+                        dashboard_selected_row(&self.ui, panel)
+                    }
+                    SpatialDirection::Up | SpatialDirection::Down => 0,
+                };
+                self.land_in_dashboard_box(target, direction, across);
                 return true;
             }
             (column, row) = next;
@@ -144,13 +162,46 @@ impl App {
             })
             .min_by_key(|(rank, _)| *rank);
         if let Some((_, panel)) = target {
-            self.land_in_dashboard_box(panel, direction);
+            let across = if panel == DashboardPanel::Start
+                && let Some((grid, columns)) = self.start_grid()
+            {
+                if vertical {
+                    let pitch = usize::from(grid.width) / columns;
+                    let offset = (center(from.x, from.width) / 2)
+                        .saturating_sub(u32::from(bounds.x) + u32::from(grid.x));
+                    usize::try_from(offset).unwrap_or(usize::MAX) / pitch.max(1)
+                } else {
+                    let offset = (center(from.y, from.height) / 2)
+                        .saturating_sub(u32::from(bounds.y) + u32::from(grid.y));
+                    offset.min(u32::from(grid.height.saturating_sub(1))) as usize
+                }
+            } else {
+                0
+            };
+            self.land_in_dashboard_box(panel, direction, across);
         }
     }
 
-    fn land_in_dashboard_box(&mut self, panel: DashboardPanel, direction: SpatialDirection) {
-        let row = if direction == SpatialDirection::Up {
-            dashboard_rows(&self.ui, panel).saturating_sub(1)
+    fn land_in_dashboard_box(
+        &mut self,
+        panel: DashboardPanel,
+        direction: SpatialDirection,
+        across: usize,
+    ) {
+        let last = dashboard_rows(&self.ui, panel).saturating_sub(1);
+        let row = if panel == DashboardPanel::Start {
+            let columns = self.start_grid().map_or(1, |(_, columns)| columns);
+            match direction {
+                SpatialDirection::Down => across.min(columns - 1).min(last),
+                SpatialDirection::Up => last / columns * columns + across.min(last % columns),
+                SpatialDirection::Right => across.min(last / columns) * columns,
+                SpatialDirection::Left => {
+                    let column = (columns - 1).min(last);
+                    across.min((last - column) / columns) * columns + column
+                }
+            }
+        } else if direction == SpatialDirection::Up {
+            last
         } else {
             0
         };

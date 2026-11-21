@@ -284,7 +284,7 @@ fn ctrl_hjkl_move_between_boxes_and_enter_and_numbers_open_the_right_file() {
 }
 
 #[test]
-fn dashboard_motion_continues_at_box_edges() {
+fn dashboard_start_moves_by_grid_cells_and_hands_off_at_edges() {
     use crate::app::tests::driver::TestSession;
     use crate::app::windows::NativeSurfaceTarget;
     use crate::ui::render::{dashboard_focus, dashboard_selected_row};
@@ -292,7 +292,7 @@ fn dashboard_motion_continues_at_box_edges() {
     use crate::windows::WindowRect;
 
     let mut driver = TestSession::new(crate::config::load_bundled_config());
-    driver.resize(160, 40);
+    driver.resize(120, 36);
     let app = driver.application_mut();
     assert_eq!(app.active_input_context(), "dashboard");
     let root = app.state.workspace_root.clone();
@@ -308,11 +308,13 @@ fn dashboard_motion_continues_at_box_edges() {
         changed: 2,
         untracked: 0,
     });
-    app.ui.dashboard_workspace.projects = vec![DashboardProject {
-        path: root,
-        name: "project".into(),
-        branch: None,
-    }];
+    app.ui.dashboard_workspace.projects = ["first", "second"]
+        .map(|name| DashboardProject {
+            path: root.join(name),
+            name: name.into(),
+            branch: None,
+        })
+        .into();
     let focus = |driver: &TestSession| {
         let app = driver.application();
         let panel = dashboard_focus(&app.ui, app.dashboard_panels());
@@ -323,29 +325,36 @@ fn dashboard_motion_continues_at_box_edges() {
     let window = driver.focused_window();
     let notices = driver.application().notices.history().count();
     for (key, panel, row) in [
-        ("k", DashboardPanel::Changes, 1),
-        ("up", DashboardPanel::Changes, 0),
-        ("k", DashboardPanel::Changes, 0),
-        ("j", DashboardPanel::Changes, 1),
+        ("j", DashboardPanel::Start, 2),   // explorer, below find file
+        ("k", DashboardPanel::Start, 0),   // find file
+        ("l", DashboardPanel::Start, 1),   // find text, right of find file
+        ("l", DashboardPanel::Start, 1),   // no box to the right
+        ("k", DashboardPanel::Changes, 1), // first row hands off, landing at the bottom
         ("j", DashboardPanel::Start, 0),
         ("h", DashboardPanel::Projects, 0),
-        ("l", DashboardPanel::Start, 0),
+        ("j", DashboardPanel::Projects, 1),
+        ("l", DashboardPanel::Start, 2), // nearest row from Projects, in the left column
         ("left", DashboardPanel::Projects, 0),
         ("ctrl-l", DashboardPanel::Start, 0),
-        ("right", DashboardPanel::Start, 0),
-        ("ctrl-l", DashboardPanel::Start, 0),
-        ("ctrl-j", DashboardPanel::Start, 0),
+        ("right", DashboardPanel::Start, 1),
+        ("ctrl-l", DashboardPanel::Start, 1),
+        ("ctrl-j", DashboardPanel::Start, 1), // Ctrl-j does not move within Start
+        ("j", DashboardPanel::Start, 3),
+        ("j", DashboardPanel::Start, 5),
+        ("j", DashboardPanel::Start, 7),
+        ("j", DashboardPanel::Start, 7), // no item below plugins
+        ("h", DashboardPanel::Start, 6),
+        ("j", DashboardPanel::Start, 8), // quit is alone on the last row
+        ("l", DashboardPanel::Start, 8),
+        ("k", DashboardPanel::Start, 6), // config, directly above quit
+        ("down", DashboardPanel::Start, 8),
     ] {
         driver.key(key);
         assert_eq!(focus(&driver), (panel, row), "after {key}");
         assert_eq!(driver.focused_window(), window, "after {key}");
     }
     let last = driver.application().ui.dashboard_actions.len() - 1;
-    for _ in 0..=last {
-        driver.key("down");
-    }
     assert_eq!(focus(&driver), (DashboardPanel::Start, last));
-    assert_eq!(driver.focused_window(), window);
     assert_eq!(driver.application().notices.history().count(), notices);
 
     // A window at the bottom right returns to Start, not the previously focused Projects box.
@@ -357,9 +366,9 @@ fn dashboard_motion_continues_at_box_edges() {
         .apply_native_window_placement(
             NativeSurfaceTarget::Explorer,
             WindowPlacement::Floating(WindowRect {
-                x: 115,
-                y: 30,
-                width: 30,
+                x: 90,
+                y: 28,
+                width: 26,
                 height: 8,
             }),
         )
@@ -421,12 +430,24 @@ fn the_dashboard_selection_runs_actions_and_ctrl_h_l_reach_an_agent_beside_it() 
     assert!(driver.application_mut().window_session.terminal_focused());
     driver.key("ctrl-h");
 
-    // With no recent files the actions are selected; the selection stops at the ends, and
-    // Enter runs the highlighted action.
-    for key in ["k", "j", "j", "k", "down", "down", "down"] {
-        driver.key(key);
+    // Return to find file from the near edge and move to tutor in the grid left by the agent.
+    let app = driver.application();
+    let (_, columns) = app.start_grid().unwrap();
+    let selected = app.ui.dashboard_selected;
+    for _ in 0..selected % columns {
+        driver.key("h");
     }
-    assert_eq!(driver.application_mut().ui.dashboard_selected, 4);
+    for _ in 0..selected / columns {
+        driver.key("k");
+    }
+    let tutor = 4;
+    for _ in 0..tutor / columns {
+        driver.key("j");
+    }
+    for _ in 0..tutor % columns {
+        driver.key("l");
+    }
+    assert_eq!(driver.application().ui.dashboard_selected, tutor);
     let frame = driver.frame();
     let selected = (0..frame.grid.height())
         .flat_map(|y| (0..frame.grid.width()).map(move |x| (x, y)))
