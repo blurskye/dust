@@ -75,6 +75,7 @@ pub(super) struct InputState {
     /// The staging effect refused for unsaved content, replayed when the answer is Yes.
     pending_stage: Option<(crate::app::commands::AppEffect, Option<u32>)>,
     stage_save: Option<crate::files::RequestId>,
+    pending_recovery_discard: Option<PathBuf>,
     picker_normal: bool,
     documentation: Option<crate::ui::DocumentationPopupState>,
     history_cleared: bool,
@@ -168,6 +169,7 @@ impl InputState {
             prompt: None,
             pending_stage: None,
             stage_save: None,
+            pending_recovery_discard: None,
             picker_normal: false,
             documentation: None,
             history_cleared: false,
@@ -235,6 +237,12 @@ impl InputState {
             None
         }
     }
+    pub(in crate::app) fn set_pending_recovery_discard(&mut self, journal: PathBuf) {
+        self.pending_recovery_discard = Some(journal);
+    }
+    pub(in crate::app) fn take_pending_recovery_discard(&mut self) -> Option<PathBuf> {
+        self.pending_recovery_discard.take()
+    }
     pub(in crate::app) fn capture_context(&self) -> Option<&'static str> {
         if let Some(prompt) = &self.prompt {
             return Some(match prompt.kind {
@@ -254,6 +262,7 @@ impl InputState {
                 | crate::ui::PromptKind::PluginConfirmation
                 | crate::ui::PromptKind::TerminalClose
                 | crate::ui::PromptKind::DirtyClose
+                | crate::ui::PromptKind::RecoveryDiscard
                 | crate::ui::PromptKind::GitStageUnsaved => "confirmation_prompt",
                 crate::ui::PromptKind::GitDestructive
                 | crate::ui::PromptKind::AgentPermission
@@ -923,6 +932,7 @@ impl InputState {
             self.capture_changed();
         }
         self.prompt = None;
+        self.pending_recovery_discard = None;
         self.history_index = None;
         self.history_draft = None;
         self.cancel_prompt_completions();
@@ -1167,6 +1177,7 @@ impl InputState {
                 | PromptKind::PluginConfirmation
                 | PromptKind::TerminalClose
                 | PromptKind::DirtyClose
+                | PromptKind::RecoveryDiscard
                 | PromptKind::GitStageUnsaved
                 | PromptKind::GitDestructive
                 | PromptKind::AgentPermission
@@ -2250,6 +2261,7 @@ impl App {
                             | PromptKind::PluginConfirmation
                             | PromptKind::TerminalClose
                             | PromptKind::DirtyClose
+                            | PromptKind::RecoveryDiscard
                             | PromptKind::GitStageUnsaved
                             | PromptKind::GitDestructive
                     )

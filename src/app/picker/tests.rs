@@ -17,6 +17,63 @@ use std::time::Duration;
 use std::time::Instant;
 
 #[test]
+fn recovery_picker_discards_only_after_explicit_confirmation() {
+    use crate::ui::ConfirmationChoice;
+    use crate::ui::PromptKind;
+
+    let (_dirs, mut app) = app();
+    app.recovery.skip_maintenance();
+    let directory = app.recovery.directory();
+    fs::create_dir_all(directory).unwrap();
+    let journal = directory.join("buffer-draft.toml");
+    let file = app.state.workspace_root.join("draft.txt");
+    let record = crate::files::RecoveryRecord::new(Some(&file), 1, "one\ntwo\n".into());
+    crate::files::write_recovery(&journal, &record).unwrap();
+    app.recovery
+        .fixture_records(vec![(journal.clone(), record)]);
+
+    app.open_recovery_picker();
+    let selected_row = |app: &App| {
+        app.search
+            .picker()
+            .unwrap()
+            .selected_item()
+            .unwrap()
+            .id
+            .clone()
+    };
+    let row_id = selected_row(&app);
+    app.process_effect(AppEffect::PickerRemove);
+    wait_vfs(&mut app);
+    let prompt = app.ui.prompt.as_ref().expect("discard must ask first");
+    assert_eq!(prompt.kind, PromptKind::RecoveryDiscard);
+    let confirmation = prompt.confirmation.as_ref().unwrap();
+    assert_eq!(confirmation.title, "Discard unsaved work");
+    assert_eq!(
+        confirmation.message,
+        "Discard the unsaved changes to draft.txt (2 lines)? This can't be undone."
+    );
+    assert_eq!(confirmation.selected, ConfirmationChoice::No);
+    assert!(journal.exists());
+
+    // Enter takes the default No; Escape also returns to the same picker row.
+    for key in ["enter", "escape"] {
+        app.handle_configured_key(key.parse().unwrap());
+        wait_vfs(&mut app);
+        assert!(app.ui.prompt.is_none());
+        assert!(journal.exists());
+        assert_eq!(selected_row(&app), row_id);
+        app.process_effect(AppEffect::PickerRemove);
+    }
+
+    app.handle_configured_key("y".parse().unwrap());
+    wait_vfs(&mut app);
+    assert!(app.ui.prompt.is_none());
+    assert!(app.ui.picker.is_none());
+    assert!(!journal.exists());
+}
+
+#[test]
 fn replacement_select_uses_native_row_actions_and_rejects_old_answers() {
     let (_dirs, mut app) = app();
     let (sender, requests) = std::sync::mpsc::sync_channel(8);

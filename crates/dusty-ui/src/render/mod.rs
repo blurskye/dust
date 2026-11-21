@@ -228,6 +228,7 @@ pub enum PromptKind {
     PluginConfirmation,
     TerminalClose,
     DirtyClose,
+    RecoveryDiscard,
     GitStageUnsaved,
     GitDestructive,
     AgentPermission,
@@ -253,6 +254,7 @@ impl PromptKind {
             Self::PluginConfirmation => "Plugin confirmation",
             Self::TerminalClose => "Close terminal",
             Self::DirtyClose => "Close document",
+            Self::RecoveryDiscard => "Discard unsaved work",
             Self::GitStageUnsaved => "Stage unsaved changes",
             Self::GitDestructive => "Confirm Git change",
             Self::AgentPermission => "Agent permission",
@@ -278,6 +280,7 @@ impl PromptKind {
             Self::PluginConfirmation
             | Self::TerminalClose
             | Self::DirtyClose
+            | Self::RecoveryDiscard
             | Self::GitStageUnsaved
             | Self::GitDestructive
             | Self::AgentPermission

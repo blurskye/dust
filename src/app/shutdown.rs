@@ -223,7 +223,12 @@ impl App {
         match effect {
             AppEffect::Quit { force } => {
                 if !force && self.state.buffers.iter().any(|(_, buffer)| buffer.dirty) {
-                    self.show_error(self.message("unsaved_quit", &[]));
+                    let key = if self.configuration.settings().recovery.enabled {
+                        "unsaved_quit_recovery"
+                    } else {
+                        "unsaved_quit"
+                    };
+                    self.show_error(self.message(key, &[]));
                 } else {
                     if force {
                         self.queue_dirty_recovery_before_exit();

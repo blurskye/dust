@@ -421,6 +421,7 @@ impl App {
                 | PromptKind::PluginConfirmation
                 | PromptKind::TerminalClose
                 | PromptKind::DirtyClose
+                | PromptKind::RecoveryDiscard
                 | PromptKind::BreakpointCondition
                 | PromptKind::ReplaceFind
                 | PromptKind::ReplaceWith
@@ -505,6 +506,22 @@ impl App {
                     self.confirm_explorer_delete();
                 }
                 self.close_prompt();
+            }
+            PromptKind::RecoveryDiscard => {
+                let confirmed = prompt
+                    .confirmation
+                    .is_some_and(|state| state.selected == crate::ui::ConfirmationChoice::Yes);
+                let journal = self.input.take_pending_recovery_discard();
+                self.close_prompt();
+                if confirmed
+                    && let Some(journal) = journal
+                    && self
+                        .recovery
+                        .discard(&journal, true, self.documents.recovery_io())
+                        .is_err()
+                {
+                    self.show_error("Couldn't discard the unsaved work.");
+                }
             }
             PromptKind::PluginConfirmation => {
                 // The extension owner asynchronously consumes this one-shot result.

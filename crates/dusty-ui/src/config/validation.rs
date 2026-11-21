@@ -360,6 +360,7 @@ impl Config {
         }
         const REQUIRED_MESSAGES: &[&str] = &[
             "unsaved_quit",
+            "unsaved_quit_recovery",
             "new_scratch",
             "macro_recording",
             "macro_recorded",

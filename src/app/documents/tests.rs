@@ -3475,6 +3475,7 @@ fn recovery_dialog_discards_one_journal_and_recovers_another() {
     assert!(picker.rows[1].label.contains("notes.md"));
 
     app.invoke_mapped_command("picker.remove");
+    app.invoke_mapped_command("surface.confirmation.select_yes");
     wait_vfs(&mut app);
     assert!(!dropped.exists());
     let picker = app.ui.picker.as_ref().expect("the dialog stays open");

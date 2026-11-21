@@ -689,6 +689,7 @@ pkginstall = "package.registry.install"
 [messages]
 git_review_footer = "j/k Files · ]h/[h Hunks · s Stage file · u Unstage file · S/U Hunk · r Discard · Enter Open · Tab Diff · Esc Close"
 unsaved_quit = "unsaved changes: :wa saves them, :q! discards them"
+unsaved_quit_recovery = "unsaved changes: :wa saves them, :q! quits and keeps a recovery copy (:recovery)"
 conflict_none = "no conflict markers in this file"
 mark_unset = "mark {name} is not set"
 recovery_too_large = "this file is too large for crash recovery; save it to keep your changes"

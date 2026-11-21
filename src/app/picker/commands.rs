@@ -3,7 +3,9 @@
 use crate::app::App;
 use crate::app::commands::AppEffect;
 use crate::app::picker::PickerPayload;
+use crate::ui::ConfirmationChoice;
 use crate::ui::PickerSurfaceKind;
+use crate::ui::PromptKind;
 
 use crate::app::commands::register;
 use crate::app::commands::string_arg;
@@ -157,11 +159,23 @@ impl App {
             }
             AppEffect::PickerRemove => match self.search.selected_picker_payload().cloned() {
                 Some(PickerPayload::Recovery(journal)) => {
-                    if let Err(error) =
-                        self.recovery
-                            .discard(&journal, true, self.documents.recovery_io())
+                    if let Some(item) = self
+                        .search
+                        .picker()
+                        .and_then(|picker| picker.selected_item())
                     {
-                        self.show_error(error);
+                        let kind = PromptKind::RecoveryDiscard;
+                        self.open_confirmation(
+                            kind,
+                            kind.title(&self.configuration.settings().ui.command_line.text)
+                                .into(),
+                            format!(
+                                "Discard the unsaved changes to {} ({})? This can't be undone.",
+                                item.label, item.detail
+                            ),
+                            ConfirmationChoice::No,
+                        );
+                        self.input.set_pending_recovery_discard(journal);
                     }
                 }
                 Some(PickerPayload::GitWorktree { .. }) => self.request_git_worktree_remove(),
