@@ -109,6 +109,7 @@ pub enum VfsRequest {
         path: PathBuf,
         bytes: Vec<u8>,
         expectation: WriteExpectation,
+        force: bool,
     },
     ListDirectory {
         id: RequestId,
@@ -693,6 +694,7 @@ impl VfsWorker {
                                     path,
                                     bytes,
                                     expectation,
+                                    force,
                                 } => {
                                     let document = queued.document_paths.is_some();
                                     let mut path = path;
@@ -726,6 +728,12 @@ impl VfsWorker {
                                             {
                                                 expectation = WriteExpectation::Missing;
                                             }
+                                            return checked_document_write(
+                                                &path,
+                                                &bytes,
+                                                &expectation,
+                                                force,
+                                            );
                                         }
                                         checked_atomic_write(&path, &bytes, &expectation)
                                     })();
@@ -1067,6 +1075,7 @@ impl VfsWorker {
             path,
             bytes,
             expectation,
+            force: false,
         })?;
         Ok(id)
     }
@@ -1076,6 +1085,7 @@ impl VfsWorker {
         path: PathBuf,
         bytes: Vec<u8>,
         expectation: WriteExpectation,
+        force: bool,
         source_path: Option<PathBuf>,
         other_paths: Vec<PathBuf>,
     ) -> Result<RequestId, VfsError> {
@@ -1086,6 +1096,7 @@ impl VfsWorker {
                 path,
                 bytes,
                 expectation,
+                force,
             },
             Some((source_path, other_paths)),
         )?;
@@ -2481,6 +2492,100 @@ pub fn read_file(path: &Path) -> Result<Vec<u8>, VfsError> {
     read_file_bounded(path, DOCUMENT_BYTE_LIMIT)
 }
 
+fn checked_document_write(
+    path: &Path,
+    bytes: &[u8],
+    expectation: &WriteExpectation,
+    force: bool,
+) -> Result<(), VfsError> {
+    if !force {
+        check_document_write_access(path)?;
+    }
+
+    #[cfg(windows)]
+    if force
+        && matches!(expectation, WriteExpectation::Any)
+        && fs::metadata(path)
+            .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().readonly())
+    {
+        return replace_read_only_document(path, bytes);
+    }
+
+    checked_atomic_write(path, bytes, expectation)
+}
+
+fn check_document_write_access(path: &Path) -> Result<(), VfsError> {
+    let inspect_error = |source| VfsError::Io {
+        operation: "inspect write target",
+        path: path.to_path_buf(),
+        source,
+    };
+    let metadata = match fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(source) => return Err(inspect_error(source)),
+    };
+    if !metadata.is_file() {
+        return Ok(());
+    }
+    // Respect an explicit no-write mode even when running as a privileged user.
+    let read_only = || VfsError::ReadOnlyDestination(path.to_path_buf());
+    if metadata.permissions().readonly() {
+        return Err(read_only());
+    }
+    #[cfg(unix)]
+    match nix::unistd::access(path, nix::unistd::AccessFlags::W_OK) {
+        Ok(()) | Err(nix::errno::Errno::ENOENT) => {}
+        Err(nix::errno::Errno::EACCES) => return Err(read_only()),
+        Err(source) => return Err(inspect_error(source.into())),
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn replace_read_only_document(path: &Path, bytes: &[u8]) -> Result<(), VfsError> {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let replace_error = |source| VfsError::Io {
+        operation: "replace destination",
+        path: path.to_path_buf(),
+        source,
+    };
+    // Windows refuses to replace a destination with the read-only attribute set.
+    // Hold a handle so failure restores the displaced file's attribute, not a racing path.
+    const FILE_WRITE_ATTRIBUTES: u32 = 0x0100;
+    let original = fs::OpenOptions::new()
+        .access_mode(FILE_WRITE_ATTRIBUTES)
+        .open(path)
+        .map_err(replace_error)?;
+    let original_permissions = original.metadata().map_err(replace_error)?.permissions();
+    let temporary = stage_atomic_write(path, bytes)?;
+    let replace = || {
+        let mut writable = original_permissions.clone();
+        writable.set_readonly(false);
+        original.set_permissions(writable)?;
+        if let Err(error) = fs::rename(temporary.path(), path) {
+            original.set_permissions(original_permissions)?;
+            return Err(error);
+        }
+        Ok(())
+    };
+    if let Err(source) = replace() {
+        let mut writable = temporary
+            .as_file()
+            .metadata()
+            .map_err(replace_error)?
+            .permissions();
+        writable.set_readonly(false);
+        temporary
+            .as_file()
+            .set_permissions(writable)
+            .map_err(replace_error)?;
+        return Err(replace_error(source));
+    }
+    Ok(())
+}
+
 pub fn checked_atomic_write(
     path: &Path,
     bytes: &[u8],
@@ -2891,6 +2996,7 @@ mod lifecycle_tests {
                         target,
                         b"not written".to_vec(),
                         WriteExpectation::Any,
+                        true,
                         None,
                         vec![other],
                     )

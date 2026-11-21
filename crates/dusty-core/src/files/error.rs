@@ -25,6 +25,10 @@ pub enum VfsError {
     },
     #[error("refusing to overwrite externally modified file `{}`; reload or force the write", .0.display())]
     ExternalModification(PathBuf),
+    #[error("{} is read-only. Use :w! to overwrite it.",
+        .0.file_name().unwrap_or_default().to_string_lossy()
+    )]
+    ReadOnlyDestination(PathBuf),
     #[error(
         "`{}` already exists in `{}`",
         .0.file_name().unwrap_or_default().to_string_lossy(),

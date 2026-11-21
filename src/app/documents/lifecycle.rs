@@ -358,6 +358,7 @@ impl Documents {
             target.clone(),
             bytes.clone(),
             expectation,
+            request.force,
             view.path.map(Path::to_path_buf),
             request.other_open_paths,
         )?;
@@ -846,6 +847,57 @@ mod tests {
                 )))
                 .is_err()
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn saving_a_read_only_file_requires_force() {
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+        use std::time::{Duration, Instant};
+
+        let (_dirs, mut app) = crate::app::tests::app();
+        let path = app.state.workspace_root.join("readonly.txt");
+        fs::write(&path, "old\n").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o444)).unwrap();
+        let (buffer, _) = app
+            .state
+            .open_text(TextBuffer::from_text("old\n"), Some(path.clone()))
+            .unwrap();
+        app.set_dashboard_visibility(false);
+        app.replace_with_recovered(buffer, "edited\n".into())
+            .unwrap();
+
+        let save = |app: &mut crate::app::App, command| {
+            let invocation = crate::editor::input::parse_ex(
+                command,
+                &app.configuration.settings().input.command_aliases,
+            )
+            .unwrap();
+            app.invoke(invocation);
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while app.documents.file_work_pending() {
+                app.process_vfs_results();
+                assert!(Instant::now() < deadline, "save did not finish");
+                std::thread::yield_now();
+            }
+        };
+        save(&mut app, "w");
+        assert_eq!(
+            app.ui.notification.as_deref(),
+            Some("readonly.txt is read-only. Use :w! to overwrite it.")
+        );
+        assert!(app.ui.notification_error);
+        assert_eq!(fs::read(&path).unwrap(), b"old\n");
+        assert!(app.state.buffers[buffer].dirty);
+
+        save(&mut app, "w!");
+        assert_eq!(fs::read(&path).unwrap(), b"edited\n");
+        assert_eq!(
+            fs::metadata(path).unwrap().permissions().mode() & 0o777,
+            0o444
+        );
+        assert!(!app.state.buffers[buffer].dirty);
     }
 
     #[test]
