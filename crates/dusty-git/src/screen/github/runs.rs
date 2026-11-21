@@ -2695,7 +2695,10 @@ impl Workspace {
             }
             KeyCode::Char('y') => {
                 let range = self.visual_range(&rows, at).unwrap_or(at..=at);
-                let lines = rows[range]
+                // A run whose jobs haven't loaded has no rows at all.
+                let lines = rows
+                    .get(range)
+                    .unwrap_or_default()
                     .iter()
                     .filter_map(|row| row.log.as_ref())
                     .map(|(_, line)| line.text.as_str())
@@ -5698,6 +5701,21 @@ mod tests {
         workspace.run_key(&key(KeyCode::Char('V')), None).unwrap();
         workspace.run_key(&key(KeyCode::Escape), None).unwrap();
         assert!(workspace.actions.visual.is_none());
+    }
+
+    #[test]
+    fn y_in_a_run_whose_jobs_have_not_loaded_asks_for_a_log_line() {
+        let mut workspace = workspace();
+        workspace.cache.remove(&Key::Run(501, 0));
+        if let Some(Ok(reply)) = workspace.cache.get_mut(&Key::Runs(0)) {
+            reply.value[0].as_object_mut().unwrap().remove("jobs");
+        }
+        assert!(workspace.tree(KEYS).is_empty());
+
+        let copy = workspace.run_key(&KeyEvent::plain(KeyCode::Char('y')), None);
+
+        assert_eq!(copy.err().as_deref(), Some("Select a log line to copy"));
+        assert_eq!(workspace.copied, None);
     }
 
     #[test]
