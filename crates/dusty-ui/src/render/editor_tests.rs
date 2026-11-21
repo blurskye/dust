@@ -231,6 +231,36 @@ fn eof_fold_stops_forward_scrolling() {
 }
 
 #[test]
+fn relative_numbers_count_a_closed_fold_as_one_line() {
+    let mut state = EditorState::new("/tmp".into());
+    let (_, view) = state
+        .open_text(
+            crate::editor::text::TextBuffer::from_text("fn a() {\n    1\n    2\n}\nfn b() {}\n"),
+            None,
+        )
+        .unwrap();
+    let mut config = crate::config::load_bundled_config().config;
+    config.editor.line_numbers = crate::config::LineNumbers::Relative;
+    config.ui.status_line.enabled = false;
+    let ui = UiState {
+        syntax_folds: vec![crate::render::UiFold {
+            view,
+            start_line: 0,
+            end_line: 3,
+            collapsed: true,
+        }],
+        ..ui_with_editor_layout(&state)
+    };
+    let frame = crate::render::editor::render_editor_view(&state, view, &ui, &config, 30, 3);
+    assert!(
+        frame.grid.row_text(1).trim_start().starts_with("1 "),
+        "{:?}",
+        frame.grid.row_text(1)
+    );
+    assert!(frame.grid.row_text(1).contains("fn b()"));
+}
+
+#[test]
 fn inlay_budgets_survive_wrapped_scrolling_and_leave_source_visible() {
     use crate::editor::text::ByteOffset;
     use crate::editor::text::TextBuffer;

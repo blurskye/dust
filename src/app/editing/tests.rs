@@ -1803,6 +1803,56 @@ fn j_and_k_keep_their_column_across_shorter_lines() {
     assert_eq!(app.state.views[view].cursor, ByteOffset(9));
 }
 
+#[test]
+fn vertical_keys_skip_closed_folds_but_addressed_lines_open_them() {
+    let (_dirs, mut app) = app();
+    app.set_dashboard_visibility(false);
+    let source = "head\nsecond\nthird\nfourth\nfifth\nsixth\nseventh\neighth\nninth\ntenth\n";
+    let (buffer, view) = app
+        .state
+        .open_text(TextBuffer::from_text(source), None)
+        .unwrap();
+    app.ui.syntax_folds.push(UiFold {
+        view,
+        start_line: 0,
+        end_line: 4,
+        collapsed: false,
+    });
+
+    let line = |app: &App| {
+        app.state.buffers[buffer]
+            .text
+            .byte_to_line(app.state.views[view].cursor)
+            .unwrap()
+            + 1
+    };
+
+    press_keys(&mut app, &["z", "c", "j"]);
+    assert_eq!(line(&app), 6);
+    assert!(app.ui.syntax_folds[0].collapsed);
+    press(&mut app, "k");
+    assert_eq!(line(&app), 1);
+    press(&mut app, "down");
+    assert_eq!(line(&app), 6);
+    press(&mut app, "up");
+    assert_eq!(line(&app), 1);
+    press_keys(&mut app, &["3", "j"]);
+    assert_eq!(line(&app), 8);
+    assert!(app.ui.syntax_folds[0].collapsed);
+
+    press_keys(&mut app, &[":", "3", "enter"]);
+    assert_eq!(line(&app), 3);
+    assert!(!app.ui.syntax_folds[0].collapsed);
+    press_keys(&mut app, &["z", "c"]);
+    assert_eq!(line(&app), 1);
+    assert!(app.ui.syntax_folds[0].collapsed);
+    press_keys(&mut app, &["i", "X", "escape"]);
+    assert_eq!(
+        app.state.buffers[buffer].text.to_string(),
+        format!("X{source}")
+    );
+}
+
 pub(in crate::app) fn press(app: &mut App, key: &str) {
     app.handle_event(UiEvent::Key {
         key: key.parse().unwrap(),

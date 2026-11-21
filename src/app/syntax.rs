@@ -1134,6 +1134,7 @@ impl App {
                             }
                         }
                     }
+                    self.place_cursor_at_fold_header(view);
                 }
             }
             AppEffect::SyntaxIndentLine => self.apply_syntax_indent_line(),

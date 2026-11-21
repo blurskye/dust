@@ -554,6 +554,8 @@ pub(super) fn render_editor_view(
         });
     let mut screen_row = 0_u16;
     let mut line_index = start_anchor.line;
+    // Relative numbers count a closed fold as one line, as `j` steps over it.
+    let folds = crate::render::VisualRowModel::folded_lines(&buffer.text, view_id, ui);
     // The empty line after a final newline is drawn only while the cursor is on it.
     let drawn_lines = buffer.text.visible_lines().max(current_line + 1);
     while screen_row < body_height && line_index < drawn_lines {
@@ -580,12 +582,12 @@ pub(super) fn render_editor_view(
         if gutter_width > 0 && first_line_row == 0 {
             let number = match config.editor.line_numbers {
                 LineNumbers::Absolute => line_index + 1,
-                LineNumbers::Relative => current_line.abs_diff(line_index),
+                LineNumbers::Relative => folds.distance(current_line, line_index),
                 LineNumbers::Hybrid => {
                     if line_index == current_line {
                         line_index + 1
                     } else {
-                        current_line.abs_diff(line_index)
+                        folds.distance(current_line, line_index)
                     }
                 }
                 LineNumbers::Off => 0,

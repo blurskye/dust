@@ -234,8 +234,7 @@ pub(in crate::app) fn wrapped_visual_rows_drive_margin_paging_resize_folds_and_m
         end_line: 3,
         collapsed: true,
     }];
-    app.state.views[view].cursor = app.state.buffers[buffer].text.line_to_byte(2).unwrap();
-    app.ensure_cursor_visible();
+    let hidden_position = app.state.buffers[buffer].text.line_to_byte(2).unwrap();
     let folded_model = VisualRowModel::new(
         &app.state.buffers[buffer].text,
         view,
@@ -244,12 +243,7 @@ pub(in crate::app) fn wrapped_visual_rows_drive_margin_paging_resize_folds_and_m
         viewport.width,
         true,
     );
-    assert_eq!(
-        folded_model
-            .cursor_anchor(app.state.views[view].cursor)
-            .line,
-        1
-    );
+    assert_eq!(folded_model.cursor_anchor(hidden_position).line, 1);
 
     app.ui.lsp_folds.clear();
     app.state.views[view].cursor = ByteOffset(0);

@@ -51,6 +51,7 @@ pub use state::EditorState;
 pub use state::EditorTopology;
 pub use state::EditorVersion;
 pub use state::EditorWindowVersion;
+pub use state::FoldedLines;
 pub use state::RegisterShape;
 pub use state::RegisterStore;
 pub use state::RegisterValue;

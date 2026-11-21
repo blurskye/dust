@@ -14,6 +14,7 @@ use crate::config::EditorConfig;
 use crate::config::LineNumbers;
 
 use crate::editor::EditorState;
+use crate::editor::FoldedLines;
 
 use crate::editor::text::ByteOffset;
 
@@ -128,7 +129,7 @@ pub struct VisualRowAnchor {
 /// snapshots only and performs no parsing or service work.
 pub struct VisualRowModel<'a> {
     text: &'a crate::editor::text::TextBuffer,
-    folds: Vec<(usize, usize)>,
+    folds: FoldedLines,
     wrap: bool,
     content_width: usize,
     tab_width: usize,
@@ -161,6 +162,23 @@ struct VisualRowConstruction<'text, 'input> {
 }
 
 impl<'a> VisualRowModel<'a> {
+    /// The same collapsed source lines used by the renderer and cursor motions.
+    #[must_use]
+    pub fn folded_lines(
+        text: &crate::editor::text::TextBuffer,
+        view: crate::editor::ViewId,
+        ui: &UiState,
+    ) -> FoldedLines {
+        FoldedLines::new(
+            ui.lsp_folds
+                .iter()
+                .chain(&ui.syntax_folds)
+                .filter(|fold| fold.view == view && fold.collapsed)
+                .map(|fold| (fold.start_line, fold.end_line)),
+            text.len_lines().saturating_sub(1),
+        )
+    }
+
     #[must_use]
     pub fn new(
         text: &'a crate::editor::text::TextBuffer,
@@ -327,32 +345,9 @@ impl<'a> VisualRowModel<'a> {
             minimum_digits,
             inlay_widths,
         } = construction;
-        let maximum = text.len_lines().saturating_sub(1);
-        let mut folds = ui
-            .lsp_folds
-            .iter()
-            .chain(ui.syntax_folds.iter())
-            .filter(|fold| fold.view == view && fold.collapsed)
-            .filter_map(|fold| {
-                let start = fold.start_line.min(maximum);
-                let end = fold.end_line.min(maximum);
-                (start < end).then_some((start, end))
-            })
-            .collect::<Vec<_>>();
-        folds.sort_unstable_by_key(|&(start, end)| (start, std::cmp::Reverse(end)));
-        let mut normalized_folds: Vec<(usize, usize)> = Vec::with_capacity(folds.len());
-        for (start, end) in folds {
-            if let Some(last) = normalized_folds.last_mut()
-                && start <= last.1
-            {
-                last.1 = last.1.max(end);
-                continue;
-            }
-            normalized_folds.push((start, end));
-        }
         Self {
             text,
-            folds: normalized_folds,
+            folds: Self::folded_lines(text, view, ui),
             wrap,
             content_width: usize::from(pane_width.saturating_sub(editor_gutter_width_with_digits(
                 text,
@@ -471,10 +466,7 @@ impl<'a> VisualRowModel<'a> {
     }
 
     pub(super) fn containing_fold(&self, line: usize) -> Option<(usize, usize)> {
-        self.folds
-            .iter()
-            .copied()
-            .find(|&(start, end)| line > start && line <= end)
+        self.folds.containing(line)
     }
 
     pub(super) fn grapheme_width(&self, grapheme: &str, source_column: usize) -> usize {
@@ -849,10 +841,7 @@ impl<'a> VisualRowModel<'a> {
     #[must_use]
     pub fn normalize(&self, anchor: VisualRowAnchor) -> VisualRowAnchor {
         let maximum = self.text.len_lines().saturating_sub(1);
-        let mut line = anchor.line.min(maximum);
-        if let Some((start, _)) = self.containing_fold(line) {
-            line = start;
-        }
+        let line = self.folds.header(anchor.line.min(maximum));
         VisualRowAnchor {
             line,
             wrap_row: anchor
@@ -874,22 +863,12 @@ impl<'a> VisualRowModel<'a> {
     }
 
     pub(super) fn next_line(&self, line: usize) -> usize {
-        let folded_end = self
-            .folds
-            .iter()
-            .find_map(|&(start, end)| (start == line).then_some(end))
-            .unwrap_or(line);
-        if folded_end >= self.text.len_lines().saturating_sub(1) {
-            line
-        } else {
-            folded_end + 1
-        }
+        self.folds
+            .forward(line, 1, self.text.len_lines().saturating_sub(1))
     }
 
     pub(super) fn previous_line(&self, line: usize) -> usize {
-        let previous = line.saturating_sub(1);
-        self.containing_fold(previous)
-            .map_or(previous, |(start, _)| start)
+        self.folds.backward(line, 1)
     }
 
     #[must_use]

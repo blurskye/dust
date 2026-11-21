@@ -664,16 +664,8 @@ impl App {
                         .min_by_key(|fold| fold.end_line.saturating_sub(fold.start_line))
                     {
                         fold.collapsed = !fold.collapsed;
-                        if fold.collapsed && line.is_some_and(|line| line > fold.start_line) {
-                            let buffer = self.state.views[view].buffer;
-                            if let Ok(cursor) = self.state.buffers[buffer]
-                                .text
-                                .line_to_byte(fold.start_line)
-                            {
-                                self.state.views[view].cursor = cursor;
-                                self.state.views[view].selection = None;
-                                self.state.mark_editor_changed();
-                            }
+                        if fold.collapsed {
+                            self.place_cursor_at_fold_header(view);
                         }
                     }
                 }

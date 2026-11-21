@@ -1574,6 +1574,7 @@ impl App {
         {
             self.language.note_typed(text);
         }
+        self.project_motion_folds(&invocation);
         let outcome = self
             .commands
             .execute_with_authority(&self.state, &invocation, authority);
@@ -1605,13 +1606,17 @@ impl App {
         owner: &str,
         action: CommandWrapperAction<AppEffect>,
     ) -> bool {
+        let invocation = self.input.pending_invocation(pending);
+        if let Some(invocation) = &invocation {
+            self.project_motion_folds(&invocation.invocation);
+        }
         let outcome = self.commands.resume(&self.state, pending, owner, action);
         // An unrelated caller cannot consume the real wrapper's continuation.
         if matches!(outcome, Err(CommandError::WrongWrapper)) {
             self.show_error(CommandError::WrongWrapper);
             return false;
         }
-        let Some(invocation) = self.input.pending_invocation(pending) else {
+        let Some(invocation) = invocation else {
             self.commands.cancel(pending);
             self.show_error(CommandError::UnknownPending);
             return false;
@@ -1748,6 +1753,9 @@ impl App {
                 }
 
                 self.keep_cursor_off_final_newline();
+                if let Some(view) = invocation.target.view {
+                    self.reveal_cursor_fold(view);
+                }
                 let text_changed = invocation.target.buffer.and_then(|buffer| {
                     self.state
                         .buffers

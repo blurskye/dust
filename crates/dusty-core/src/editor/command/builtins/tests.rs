@@ -893,6 +893,34 @@ fn matching_pairs_ignore_quoted_and_escaped_delimiters_in_both_directions() {
 }
 
 #[test]
+fn delete_matching_pair_uses_the_delimiter_under_the_cursor() {
+    let mut registry = CommandRegistry::<()>::default();
+    register_builtin_commands(&mut registry).unwrap();
+    let delete_pair = CommandInvocation::new("edit.operator", InvocationSource::Test)
+        .unwrap()
+        .with_argument("operator", CommandValue::String("delete".into()))
+        .with_argument("motion", CommandValue::String("matching_pair".into()))
+        .with_argument("linewise", CommandValue::Bool(false));
+    for cursor in [5, 12] {
+        let (mut state, buffer, _) = editing(r#"one "(switch)" two (external)"#, cursor);
+        let outcome = registry.execute(&state, &delete_pair).unwrap();
+        state
+            .apply_transaction(&outcome.transaction.unwrap())
+            .unwrap();
+        assert_eq!(
+            state.buffers[buffer].text.to_string(),
+            r#"one "" two (external)"#
+        );
+    }
+
+    let (state, _, _) = editing(r#"one "(" two ")" (external)"#, 5);
+    assert!(matches!(
+        registry.execute(&state, &delete_pair),
+        Err(crate::editor::CommandError::Unavailable(_))
+    ));
+}
+
+#[test]
 fn matching_pairs_handle_unbalanced_prefixes_and_rust_lifetimes() {
     for source in [")(()", "fn f<'a, 'b>(x: &'a str)"] {
         let opening = source.rfind('(').unwrap();

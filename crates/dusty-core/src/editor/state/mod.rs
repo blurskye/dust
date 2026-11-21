@@ -20,6 +20,7 @@ pub use registers::RegisterShape;
 pub use registers::RegisterStore;
 pub use registers::RegisterValue;
 pub use view::EditorMode;
+pub use view::FoldedLines;
 pub use view::InsertRepeat;
 pub use view::ReplaceRecord;
 pub use view::Selection;

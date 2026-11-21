@@ -418,8 +418,16 @@ pub(super) fn move_all(
         } else {
             None
         };
-        let mut target =
-            motion_target(text, mark.start, motion, count, None, policy, wanted_column)?;
+        let mut target = motion_target(
+            text,
+            mark.start,
+            motion,
+            count,
+            None,
+            policy,
+            wanted_column,
+            &view.folded_lines,
+        )?;
         if wanted_column.is_some() {
             target = on_last_character(text, target)?;
         }

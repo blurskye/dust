@@ -256,6 +256,7 @@ pub(super) fn execute_builtin<E>(
                     character,
                     state.policy,
                     wanted_column,
+                    &view.folded_lines,
                 )?,
             };
             let target = if matches!(view.mode, EditorMode::Normal | EditorMode::OperatorPending)
@@ -905,25 +906,38 @@ pub(super) fn execute_builtin<E>(
                 if motion == "visual" {
                     visual_ranges(&buffer.text, view, state.policy)?
                 } else {
+                    let range = operator_range(
+                        &buffer.text,
+                        buffer.current_syntax_objects(),
+                        view.cursor,
+                        motion,
+                        count,
+                        motion != original_motion,
+                        requested_linewise,
+                        character_argument(
+                            invocation,
+                            if operator == "surround_add" {
+                                "find_character"
+                            } else {
+                                "character"
+                            },
+                        )?,
+                        state.policy,
+                        &view.folded_lines,
+                    )?;
+                    if requested_linewise && range.is_empty() && matches!(motion, "up" | "down") {
+                        transaction.undo_policy = UndoPolicy::Ignore;
+                        transaction.operations.push(EditorOperation::SetMode {
+                            view: view_id,
+                            mode: EditorMode::Normal,
+                        });
+                        return Ok(CommandOutcome {
+                            transaction: Some(transaction),
+                            ..CommandOutcome::empty()
+                        });
+                    }
                     (
-                        vec![operator_range(
-                            &buffer.text,
-                            buffer.current_syntax_objects(),
-                            view.cursor,
-                            motion,
-                            count,
-                            motion != original_motion,
-                            requested_linewise,
-                            character_argument(
-                                invocation,
-                                if operator == "surround_add" {
-                                    "find_character"
-                                } else {
-                                    "character"
-                                },
-                            )?,
-                            state.policy,
-                        )?],
+                        vec![range],
                         if requested_linewise {
                             RegisterShape::Line
                         } else {

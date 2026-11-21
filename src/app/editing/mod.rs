@@ -20,6 +20,7 @@ use crate::app::configuration::configured_grapheme_width;
 use crate::app::configuration::configured_text_width;
 use crate::app::windows::NativeDescriptions;
 use crate::editor::CommandInvocation;
+use crate::editor::CommandValue;
 use crate::editor::EditorMode;
 use crate::editor::EditorOperation;
 use crate::editor::EditorTransaction;
