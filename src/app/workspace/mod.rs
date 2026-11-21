@@ -1177,7 +1177,7 @@ impl App {
         for (plugin, load) in self.extension.cancel_pending_packages() {
             self.remove_plugin_contributions(&plugin, load);
         }
-        self.debugger_session.reset();
+        self.debugger_session.reset(&mut self.state);
         self.input.clear_snippet();
         for name in self.tasks.names() {
             if let Ok(owner) = DiagnosticOwner::new(format!("task:{name}")) {

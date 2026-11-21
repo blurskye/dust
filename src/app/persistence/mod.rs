@@ -490,7 +490,7 @@ impl App {
             changes: outside_practice_projects(self.persistence.changes()),
             command_history: self.input.command_history().to_vec(),
             search_history: self.input.search_history().to_vec(),
-            breakpoints: self.debugger_session.persisted_breakpoints(),
+            breakpoints: self.debugger_session.persisted_breakpoints(&self.state),
             large_file_overrides: self
                 .documents
                 .policy_overrides()
@@ -551,6 +551,7 @@ impl App {
                         state.breakpoints,
                         state.watches,
                         &self.workspace,
+                        &mut self.state,
                     );
                     self.documents.restore_policy(
                         state

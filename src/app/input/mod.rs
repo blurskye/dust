@@ -57,7 +57,10 @@ pub(super) struct InputState {
         usize,
         usize,
     )>,
-    pending_breakpoint: Option<crate::debugger::DapSourceBreakpoint>,
+    pending_breakpoint: Option<(
+        crate::debugger::DapSourceBreakpoint,
+        crate::app::debugger::BreakpointLocation,
+    )>,
     modal: ModalResolver,
     named_mode: Option<(
         crate::editor::EditorWindowVersion,
@@ -1068,12 +1071,16 @@ impl InputState {
     pub(in crate::app) fn set_pending_breakpoint(
         &mut self,
         row: crate::debugger::DapSourceBreakpoint,
+        location: crate::app::debugger::BreakpointLocation,
     ) {
-        self.pending_breakpoint = Some(row);
+        self.pending_breakpoint = Some((row, location));
     }
     pub(in crate::app) fn take_pending_breakpoint(
         &mut self,
-    ) -> Option<crate::debugger::DapSourceBreakpoint> {
+    ) -> Option<(
+        crate::debugger::DapSourceBreakpoint,
+        crate::app::debugger::BreakpointLocation,
+    )> {
         self.pending_breakpoint.take()
     }
     pub(in crate::app) fn prompt_insert(&mut self, text: &str) {

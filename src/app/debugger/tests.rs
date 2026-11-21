@@ -19,6 +19,10 @@ use std::time::Duration;
 #[cfg(unix)]
 use std::time::Instant;
 
+fn empty_editor() -> EditorState {
+    EditorState::new(PathBuf::new())
+}
+
 #[test]
 fn breakpoint_toggle_uses_disabled_state_after_another_breakpoint_is_added() {
     let (_app_dirs, mut app) = app();
@@ -35,13 +39,22 @@ fn breakpoint_toggle_uses_disabled_state_after_another_breakpoint_is_added() {
         log_message: None,
     };
     app.toggle_breakpoint_disabled();
-    assert!(app.debugger_session.persisted_breakpoints().is_empty());
-    app.debugger_session.breakpoint(at(1), false).unwrap();
+    assert!(
+        app.debugger_session
+            .persisted_breakpoints(&app.state)
+            .is_empty()
+    );
+    app.debugger_session
+        .breakpoint(at(1), false, &mut app.state)
+        .unwrap();
     app.toggle_breakpoint_disabled();
-    app.debugger_session.breakpoint(at(2), false).unwrap();
+    app.debugger_session
+        .breakpoint(at(2), false, &mut app.state)
+        .unwrap();
     app.toggle_breakpoint_disabled();
     assert_eq!(
-        app.debugger_session.breakpoint_disabled(&path, 1),
+        app.debugger_session
+            .breakpoint_disabled(&path, 1, &app.state),
         Some(false)
     );
 }
@@ -63,7 +76,9 @@ fn breakpoint_condition_prompt_preserves_its_original_target_and_other_settings(
         hit_condition: Some("3".into()),
         log_message: Some("value={value}".into()),
     };
-    app.debugger_session.breakpoint(row.clone(), false).unwrap();
+    app.debugger_session
+        .breakpoint(row.clone(), false, &mut app.state)
+        .unwrap();
     app.process_effect(AppEffect::DapBreakpointConfigure {
         condition: None,
         hit_condition: None,
@@ -80,11 +95,14 @@ fn breakpoint_condition_prompt_preserves_its_original_target_and_other_settings(
     app.submit_prompt();
     let mut expected = row;
     expected.condition = Some("old && ready".into());
-    assert_eq!(app.debugger_session.persisted_breakpoints().len(), 1);
+    assert_eq!(
+        app.debugger_session.persisted_breakpoints(&app.state).len(),
+        1
+    );
     assert_eq!(
         app.debugger_session
-            .breakpoint_at(&expected.path, expected.line),
-        Some(&expected)
+            .breakpoint_at(&expected.path, expected.line, &app.state),
+        Some(expected)
     );
 }
 
@@ -256,6 +274,7 @@ fn breakpoint_gutter_signs_distinguish_disabled_breakpoints() {
                 log_message: None,
             },
             false,
+            &mut app.state,
         )
         .unwrap();
     app.project_debug_panes();
@@ -265,7 +284,7 @@ fn breakpoint_gutter_signs_distinguish_disabled_breakpoints() {
         crate::ui::DebugSignKind::ConditionalBreakpoint
     );
     app.debugger_session
-        .set_breakpoint_disabled(&path, 10, true);
+        .set_breakpoint_disabled(&path, 10, true, &app.state);
     app.project_debug_panes();
     assert_eq!(app.ui.debug_signs[0].line, 9);
     assert_eq!(
@@ -273,7 +292,7 @@ fn breakpoint_gutter_signs_distinguish_disabled_breakpoints() {
         crate::ui::DebugSignKind::DisabledBreakpoint
     );
     app.debugger_session
-        .set_breakpoint_disabled(&path, 10, false);
+        .set_breakpoint_disabled(&path, 10, false, &app.state);
     app.project_debug_panes();
     assert_eq!(
         app.ui.debug_signs[0].kind,
@@ -309,6 +328,103 @@ fn breakpoint_gutter_signs_distinguish_disabled_breakpoints() {
         .unwrap();
     app.project_debug_panes();
     assert_eq!(app.ui.debug_signs[0].line, 9);
+}
+
+#[test]
+fn conditional_breakpoint_request_follows_an_inserted_line() {
+    use crate::editor::text::{ByteRange, TextEdit, TextEditSet};
+    use crate::editor::{EditorOperation, EditorTransaction, TransactionId};
+
+    let (mut owner, adapter) = request_fixture();
+    let mut editor = empty_editor();
+    let path = crate::files::absolute_test_path("/source.rs");
+    let (buffer, _) = editor
+        .open_text(TextBuffer::from_text("first\nsecond\n"), Some(path.clone()))
+        .unwrap();
+    let mut row = DapSourceBreakpoint {
+        path: path.clone(),
+        line: 2,
+        column: None,
+        condition: Some("n > 1".into()),
+        hit_condition: None,
+        log_message: None,
+    };
+    owner.breakpoint(row.clone(), false, &mut editor).unwrap();
+    adapter.control().unwrap();
+    let revision = editor.buffers[buffer].text.revision();
+    editor
+        .apply_transaction(&EditorTransaction::new(TransactionId(1)).with_operation(
+            EditorOperation::ApplyEdits {
+                buffer,
+                edits: TextEditSet::new(
+                    revision,
+                    vec![TextEdit::new(ByteRange::empty(ByteOffset(0)), "new\n")],
+                ),
+            },
+        ))
+        .unwrap();
+
+    row.line = 3;
+    assert_eq!(
+        owner.startup_breakpoints(&editor),
+        [(path.clone(), vec![row.clone()])]
+    );
+    owner.sync_breakpoint_locations(&mut editor);
+    owner.try_event(&editor);
+    assert!(matches!(
+        adapter.control(),
+        Some(DapControl::SetBreakpoints { path: source, breakpoints })
+            if source == path && breakpoints == [row]
+    ));
+}
+
+#[test]
+fn disabled_breakpoint_stays_disabled_after_restore() {
+    let (_app_dirs, mut app) = app();
+    let path = app.state.workspace_root.join("source.rs");
+    app.debugger_session
+        .breakpoint(
+            DapSourceBreakpoint {
+                path: path.clone(),
+                line: 2,
+                column: None,
+                condition: Some("n > 1".into()),
+                hit_condition: None,
+                log_message: None,
+            },
+            false,
+            &mut app.state,
+        )
+        .unwrap();
+    app.debugger_session
+        .set_breakpoint_disabled(&path, 2, true, &app.state);
+    let saved =
+        serde_json::to_vec(&app.debugger_session.persisted_breakpoints(&app.state)).unwrap();
+    let mut legacy: serde_json::Value = serde_json::from_slice(&saved).unwrap();
+    legacy[0].as_object_mut().unwrap().remove("disabled");
+    let legacy: Vec<PersistedBreakpoint> = serde_json::from_value(legacy).unwrap();
+    assert!(!legacy[0].disabled);
+
+    let (mut restored, adapter) = request_fixture();
+    restored.restore(
+        serde_json::from_slice(&saved).unwrap(),
+        Vec::new(),
+        &app.workspace,
+        &mut app.state,
+    );
+    assert_eq!(
+        restored.breakpoint_disabled(&path, 2, &app.state),
+        Some(true)
+    );
+    assert!(matches!(
+        adapter.control(),
+        Some(DapControl::SetBreakpoints { path: source, breakpoints })
+            if source == path && breakpoints.is_empty()
+    ));
+    assert_eq!(
+        restored.startup_breakpoints(&app.state),
+        [(path, Vec::new())]
+    );
 }
 
 #[cfg(unix)]
@@ -632,8 +748,8 @@ fn debugger_owner_keeps_original_actor_stop_context_and_private_selection() {
         hit_condition: None,
         log_message: None,
     };
-    owner.breakpoint(row, false).unwrap();
-    assert_eq!(owner.persisted_breakpoints().len(), 1);
+    owner.breakpoint(row, false, &mut empty_editor()).unwrap();
+    assert_eq!(owner.persisted_breakpoints(&empty_editor()).len(), 1);
     let (service, adapter) = crate::debugger::test_session();
     owner.service = service;
     adapter.event(
@@ -646,7 +762,7 @@ fn debugger_owner_keeps_original_actor_stop_context_and_private_selection() {
             response: crate::debugger::DapResponse::Threads(Vec::new()),
         },
     );
-    assert!(owner.try_event().is_some());
+    assert!(owner.try_event(&empty_editor()).is_some());
     let keys = owner.controls(vec![("thread".into(), String::new(), DapControl::Threads)]);
     let editor = EditorState::new(root.path().into());
     let windows = crate::app::windows::Windows::new(false, 10);
@@ -682,7 +798,7 @@ fn debugger_owner_keeps_original_actor_stop_context_and_private_selection() {
             response: crate::debugger::DapResponse::Threads(Vec::new()),
         },
     );
-    assert!(owner.try_event().is_some());
+    assert!(owner.try_event(&empty_editor()).is_some());
     adapter.advance(3);
     assert!(
         owner
@@ -824,15 +940,17 @@ fn breakpoint_states_are_session_state_driven_by_the_adapters_own_answer() {
     };
 
     // SENT BUT UNANSWERED: the breakpoint is a REQUEST, not a fact.
-    owner.breakpoint(at(10), false).unwrap();
+    owner
+        .breakpoint(at(10), false, &mut empty_editor())
+        .unwrap();
     assert_eq!(
-        owner.breakpoint_state(&path, 10),
+        owner.breakpoint_state(&path, 10, &empty_editor()),
         Some(DapBreakpointState::Requested { accepted: true }),
         "a breakpoint the adapter has not answered for is only a request"
     );
     assert!(
         !owner
-            .breakpoint_state(&path, 10)
+            .breakpoint_state(&path, 10, &empty_editor())
             .expect("a state")
             .is_verified(),
         "and it is NEVER verified before an answer arrives"
@@ -843,24 +961,28 @@ fn breakpoint_states_are_session_state_driven_by_the_adapters_own_answer() {
         &path,
         &[at(10)],
         &DapResponse::Breakpoints(vec![(true, Some(11), None)]),
+        &empty_editor(),
     );
     assert_eq!(
-        owner.breakpoint_state(&path, 10),
+        owner.breakpoint_state(&path, 10, &empty_editor()),
         Some(DapBreakpointState::Verified { line: 11 }),
         "verified at the ADAPTER's line, which it may have moved"
     );
 
     // AN ANSWER THAT DECLINES: still not verified, and the state says which case it is.
-    owner.breakpoint(at(20), false).unwrap();
+    owner
+        .breakpoint(at(20), false, &mut empty_editor())
+        .unwrap();
     owner.apply_breakpoints(
         &path,
         &[at(10), at(20)],
         &DapResponse::Breakpoints(vec![(true, Some(20), None), (false, None, None)]),
+        &empty_editor(),
     );
     // The queue holds one pending request per send, so the answer above applied to line 20's
     // request and line 20 was NOT verified.
     let declined = owner
-        .breakpoint_state(&path, 20)
+        .breakpoint_state(&path, 20, &empty_editor())
         .expect("line 20 has a state");
     assert!(
         !declined.is_verified(),
@@ -868,62 +990,74 @@ fn breakpoint_states_are_session_state_driven_by_the_adapters_own_answer() {
     );
 
     // DISABLING IS SESSION STATE, and it survives an adapter answer that says otherwise.
-    owner.set_breakpoint_disabled(&path, 10, true);
+    owner.set_breakpoint_disabled(&path, 10, true, &empty_editor());
     assert_eq!(
-        owner.breakpoint_state(&path, 10),
+        owner.breakpoint_state(&path, 10, &empty_editor()),
         Some(DapBreakpointState::Disabled)
     );
     owner.apply_breakpoints(
         &path,
         &[at(10)],
         &DapResponse::Breakpoints(vec![(true, Some(10), None)]),
+        &empty_editor(),
     );
     assert_eq!(
-        owner.breakpoint_state(&path, 10),
+        owner.breakpoint_state(&path, 10, &empty_editor()),
         Some(DapBreakpointState::Disabled),
         "a disabled breakpoint stays disabled even when the adapter verified it"
     );
 
     // Editing another breakpoint must not change disabled state or the next toggle's meaning.
-    owner.breakpoint(at(30), false).unwrap();
+    owner
+        .breakpoint(at(30), false, &mut empty_editor())
+        .unwrap();
     assert_eq!(
-        owner.breakpoint_state(&path, 10),
+        owner.breakpoint_state(&path, 10, &empty_editor()),
         Some(DapBreakpointState::Disabled)
     );
     assert!(
-        !owner.startup_breakpoints()[0]
+        !owner.startup_breakpoints(&empty_editor())[0]
             .1
             .iter()
             .any(|row| row.line == 10)
     );
-    assert_eq!(owner.breakpoint_disabled(&path, 10), Some(true));
-    owner.breakpoint(at(30), true).unwrap();
+    assert_eq!(
+        owner.breakpoint_disabled(&path, 10, &empty_editor()),
+        Some(true)
+    );
+    owner.breakpoint(at(30), true, &mut empty_editor()).unwrap();
 
     // An empty line cannot retain disabled state for a future breakpoint.
-    owner.set_breakpoint_disabled(&path, 40, true);
-    assert_eq!(owner.breakpoint_state(&path, 40), None);
-    owner.breakpoint(at(40), false).unwrap();
-    assert_eq!(owner.breakpoint_disabled(&path, 40), Some(false));
-    owner.breakpoint(at(40), true).unwrap();
+    owner.set_breakpoint_disabled(&path, 40, true, &empty_editor());
+    assert_eq!(owner.breakpoint_state(&path, 40, &empty_editor()), None);
+    owner
+        .breakpoint(at(40), false, &mut empty_editor())
+        .unwrap();
+    assert_eq!(
+        owner.breakpoint_disabled(&path, 40, &empty_editor()),
+        Some(false)
+    );
+    owner.breakpoint(at(40), true, &mut empty_editor()).unwrap();
 
     // RE-ENABLING makes it a request again rather than silently verified.
-    let disabled = owner.breakpoint_state(&path, 10) == Some(DapBreakpointState::Disabled);
-    owner.set_breakpoint_disabled(&path, 10, !disabled);
+    let disabled =
+        owner.breakpoint_state(&path, 10, &empty_editor()) == Some(DapBreakpointState::Disabled);
+    owner.set_breakpoint_disabled(&path, 10, !disabled, &empty_editor());
     assert_eq!(
-        owner.breakpoint_state(&path, 10),
+        owner.breakpoint_state(&path, 10, &empty_editor()),
         Some(DapBreakpointState::Requested { accepted: true }),
         "a re-enabled breakpoint is a request until the adapter answers for it again"
     );
 
     // REMOVAL LEAVES NO STALE VERDICT: a line that no longer has a breakpoint claims nothing.
-    owner.breakpoint(at(20), true).unwrap();
+    owner.breakpoint(at(20), true, &mut empty_editor()).unwrap();
     assert_eq!(
-        owner.breakpoint_state(&path, 20),
+        owner.breakpoint_state(&path, 20, &empty_editor()),
         None,
         "a removed breakpoint keeps no verdict at all"
     );
-    owner.breakpoint(at(10), true).unwrap();
-    assert_eq!(owner.breakpoint_state(&path, 10), None);
+    owner.breakpoint(at(10), true, &mut empty_editor()).unwrap();
+    assert_eq!(owner.breakpoint_state(&path, 10, &empty_editor()), None);
 }
 
 #[test]
@@ -962,7 +1096,7 @@ fn detaching_and_terminating_are_different_session_facts() {
             response: DapResponse::Disconnected { terminate_debuggee },
         },
     );
-    detached.try_event().unwrap();
+    detached.try_event(&empty_editor()).unwrap();
     assert!(
         detached.active_adapter().is_none(),
         "disconnect stops the service"
@@ -1002,7 +1136,7 @@ fn detaching_and_terminating_are_different_session_facts() {
             response: DapResponse::Disconnected { terminate_debuggee },
         },
     );
-    terminated.try_event().unwrap();
+    terminated.try_event(&empty_editor()).unwrap();
     assert!(
         terminated.active_adapter().is_none(),
         "disconnect stops the service"
@@ -1033,7 +1167,7 @@ fn output_chunks_join_partial_lines_and_preserve_blank_lines() {
                 output: output.into(),
             },
         );
-        assert!(owner.try_event().is_some());
+        assert!(owner.try_event(&empty_editor()).is_some());
     }
     assert_eq!(
         owner
@@ -1084,7 +1218,10 @@ fn the_console_keeps_program_output_evaluation_and_typed_commands_apart() {
             output: "hello\n".into(),
         },
     );
-    assert!(matches!(owner.try_event(), Some(DapEvent::Output { .. })));
+    assert!(matches!(
+        owner.try_event(&empty_editor()),
+        Some(DapEvent::Output { .. })
+    ));
 
     let entries = owner.console().cloned().collect::<Vec<_>>();
     assert_eq!(entries.len(), 3, "all three origins are kept: {entries:?}");
@@ -1165,7 +1302,7 @@ fn running_and_repeated_stops_clear_inspector_values_and_picker_choices() {
                 thread_id: Some(1),
             },
         );
-        assert!(owner.try_event().is_some());
+        assert!(owner.try_event(&empty_editor()).is_some());
         let epoch = owner.stop_epoch();
         // Follow the stop through the same responses that populate the inspector.
         for response in [
@@ -1237,7 +1374,7 @@ fn running_and_repeated_stops_clear_inspector_values_and_picker_choices() {
                 }
             },
         );
-        assert!(owner.try_event().is_some());
+        assert!(owner.try_event(&empty_editor()).is_some());
         assert_ne!(owner.stop_epoch(), epoch);
         assert!(
             owner.variables().is_empty(),
@@ -1309,7 +1446,7 @@ fn a_variables_answer_to_an_earlier_stop_is_refused_rather_than_presented_as_cur
     owner.begin_running();
     adapter.advance(2);
     assert!(
-        owner.try_event().is_none(),
+        owner.try_event(&empty_editor()).is_none(),
         "the transport invalidates the original stopped request"
     );
     assert!(owner.variables().is_empty());
@@ -1413,7 +1550,7 @@ fn prime_for(owner: &mut Debugger, adapter: &crate::debugger::TestAdapter) {
         },
     );
     assert!(
-        owner.try_event().is_some(),
+        owner.try_event(&empty_editor()).is_some(),
         "the session accepts an event from its actor"
     );
 }
@@ -1548,7 +1685,7 @@ fn pagination_at_the_expansion_limit_does_not_open_another_reference() {
                 response: DapResponse::Variables(leaf_variables(1)),
             },
         );
-        let DapEvent::Response { response, .. } = owner.try_event().unwrap() else {
+        let DapEvent::Response { response, .. } = owner.try_event(&empty_editor()).unwrap() else {
             panic!()
         };
         let DebugResponse::Picker { rows, .. } = owner.response(response) else {
@@ -1713,7 +1850,7 @@ fn answer(
             response,
         },
     );
-    let DapEvent::Response { response, .. } = owner.try_event().unwrap() else {
+    let DapEvent::Response { response, .. } = owner.try_event(&empty_editor()).unwrap() else {
         panic!("expected response");
     };
     owner.response(response)
@@ -1749,7 +1886,7 @@ fn evaluation_answers_follow_the_original_watch_and_console_submission() {
                 response: evaluation(value),
             },
         );
-        let DapEvent::Response { response, .. } = owner.try_event().unwrap() else {
+        let DapEvent::Response { response, .. } = owner.try_event(&empty_editor()).unwrap() else {
             panic!()
         };
         assert!(matches!(owner.response(response), DebugResponse::Absorbed));
@@ -1775,7 +1912,7 @@ fn evaluation_answers_follow_the_original_watch_and_console_submission() {
             message: "rejected".into(),
         },
     );
-    owner.try_event().unwrap();
+    owner.try_event(&empty_editor()).unwrap();
     assert!(!owner.watch_request_failed("evaluate"));
     assert!(owner.pending_submissions.is_empty());
     owner.record_console_command("good".into());
@@ -1790,7 +1927,7 @@ fn evaluation_answers_follow_the_original_watch_and_console_submission() {
             response: evaluation("ok"),
         },
     );
-    let DapEvent::Response { response, .. } = owner.try_event().unwrap() else {
+    let DapEvent::Response { response, .. } = owner.try_event(&empty_editor()).unwrap() else {
         panic!()
     };
     assert!(matches!(owner.response(response), DebugResponse::Result(_)));
@@ -1863,7 +2000,7 @@ fn variable_pages_belong_to_the_request_and_picker_activation_keeps_expansion() 
             }]),
         },
     );
-    let DapEvent::Response { response, .. } = owner.try_event().unwrap() else {
+    let DapEvent::Response { response, .. } = owner.try_event(&empty_editor()).unwrap() else {
         panic!()
     };
     let DebugResponse::Picker { rows, .. } = owner.response(response) else {
@@ -1948,17 +2085,20 @@ fn breakpoint_rejections_update_only_the_latest_requested_rows() {
         hit_condition: None,
         log_message: None,
     };
-    owner.set_breakpoint_disabled(&path, 10, true);
-    assert!(owner.disabled_breakpoints.is_empty());
-    assert_eq!(owner.breakpoint_state(&path, 10), None);
+    owner.set_breakpoint_disabled(&path, 10, true, &empty_editor());
+    assert_eq!(owner.breakpoint_state(&path, 10, &empty_editor()), None);
     assert!(adapter.control().is_none());
-    owner.breakpoint(at(10), false).unwrap();
+    owner
+        .breakpoint(at(10), false, &mut empty_editor())
+        .unwrap();
     let first_id = owner.latest_breakpoints[&path];
     let first = adapter.control().unwrap();
     assert!(
         matches!(&first, DapControl::SetBreakpoints { breakpoints, .. } if breakpoints == &[at(10)])
     );
-    owner.breakpoint(at(20), false).unwrap();
+    owner
+        .breakpoint(at(20), false, &mut empty_editor())
+        .unwrap();
     let latest_id = owner.latest_breakpoints[&path];
     let latest = adapter.control().unwrap();
     let failure = |request_id, request| DapEvent::RequestFailed {
@@ -1971,20 +2111,20 @@ fn breakpoint_rejections_update_only_the_latest_requested_rows() {
         message: "condition rejected".into(),
     };
     adapter.event(0, failure(first_id, first.clone()));
-    owner.try_event().unwrap();
+    owner.try_event(&empty_editor()).unwrap();
     assert_eq!(
-        owner.breakpoint_state(&path, 10),
+        owner.breakpoint_state(&path, 10, &empty_editor()),
         Some(DapBreakpointState::Requested { accepted: true })
     );
     adapter.event(0, failure(latest_id, latest));
-    owner.try_event().unwrap();
+    owner.try_event(&empty_editor()).unwrap();
     for line in [10, 20] {
         assert_eq!(
-            owner.breakpoint_state(&path, line),
+            owner.breakpoint_state(&path, line, &empty_editor()),
             Some(DapBreakpointState::Requested { accepted: false })
         );
     }
-    owner.set_breakpoint_disabled(&path, 20, true);
+    owner.set_breakpoint_disabled(&path, 20, true, &empty_editor());
     let request_id = owner.latest_breakpoints[&path];
     let request = adapter.control().unwrap();
     adapter.event(
@@ -1997,7 +2137,7 @@ fn breakpoint_rejections_update_only_the_latest_requested_rows() {
             response: DapResponse::Breakpoints(vec![(true, Some(12), None)]),
         },
     );
-    owner.try_event().unwrap();
+    owner.try_event(&empty_editor()).unwrap();
     adapter.event(
         0,
         DapEvent::Response {
@@ -2008,19 +2148,19 @@ fn breakpoint_rejections_update_only_the_latest_requested_rows() {
             response: DapResponse::Breakpoints(vec![(true, Some(11), None)]),
         },
     );
-    owner.try_event().unwrap();
+    owner.try_event(&empty_editor()).unwrap();
     assert_eq!(
-        owner.breakpoint_state(&path, 10),
+        owner.breakpoint_state(&path, 10, &empty_editor()),
         Some(DapBreakpointState::Verified { line: 12 })
     );
     adapter.event(0, failure(first_id, first));
-    owner.try_event().unwrap();
+    owner.try_event(&empty_editor()).unwrap();
     assert_eq!(
-        owner.breakpoint_state(&path, 10),
+        owner.breakpoint_state(&path, 10, &empty_editor()),
         Some(DapBreakpointState::Verified { line: 12 })
     );
     assert_eq!(
-        owner.breakpoint_state(&path, 20),
+        owner.breakpoint_state(&path, 20, &empty_editor()),
         Some(DapBreakpointState::Disabled)
     );
 }
@@ -2037,28 +2177,38 @@ fn breakpoint_changes_send_only_enabled_rows_and_acknowledge_the_captured_list()
         hit_condition: None,
         log_message: None,
     };
-    owner.breakpoint(at(10), false).unwrap();
+    owner
+        .breakpoint(at(10), false, &mut empty_editor())
+        .unwrap();
     let Some(DapControl::SetBreakpoints {
         breakpoints: first, ..
     }) = adapter.control()
     else {
         panic!()
     };
-    owner.breakpoint(at(20), false).unwrap();
+    owner
+        .breakpoint(at(20), false, &mut empty_editor())
+        .unwrap();
     adapter.control();
-    owner.breakpoint(at(10), true).unwrap();
+    owner.breakpoint(at(10), true, &mut empty_editor()).unwrap();
     adapter.control();
     owner.apply_breakpoints(
         &path,
         &first,
         &DapResponse::Breakpoints(vec![(true, Some(10), None)]),
+        &empty_editor(),
     );
-    assert!(!owner.breakpoint_state(&path, 20).unwrap().is_verified());
-    owner.set_breakpoint_disabled(&path, 20, true);
+    assert!(
+        !owner
+            .breakpoint_state(&path, 20, &empty_editor())
+            .unwrap()
+            .is_verified()
+    );
+    owner.set_breakpoint_disabled(&path, 20, true, &empty_editor());
     assert!(
         matches!(adapter.control(), Some(DapControl::SetBreakpoints { breakpoints, .. }) if breakpoints.is_empty())
     );
-    owner.set_breakpoint_disabled(&path, 20, false);
+    owner.set_breakpoint_disabled(&path, 20, false, &empty_editor());
     assert!(
         matches!(adapter.control(), Some(DapControl::SetBreakpoints { breakpoints, .. }) if breakpoints.len() == 1)
     );
@@ -2078,9 +2228,9 @@ fn breakpoint_changes_send_only_enabled_rows_and_acknowledge_the_captured_list()
             },
         },
     );
-    owner.try_event().unwrap();
+    owner.try_event(&empty_editor()).unwrap();
     assert_eq!(
-        owner.breakpoint_state(&path, 20),
+        owner.breakpoint_state(&path, 20, &empty_editor()),
         Some(crate::debugger::DapBreakpointState::Verified { line: 21 })
     );
 }
@@ -2096,15 +2246,19 @@ fn breakpoint_changes_retry_the_latest_configuration_after_backpressure() {
         hit_condition: None,
         log_message: None,
     };
-    owner.breakpoint(at(10), false).unwrap();
+    owner
+        .breakpoint(at(10), false, &mut empty_editor())
+        .unwrap();
     adapter.control();
     while owner.control(DapControl::Threads).is_ok() {}
-    owner.set_breakpoint_disabled(&path, 10, true);
-    owner.breakpoint(at(20), false).unwrap();
+    owner.set_breakpoint_disabled(&path, 10, true, &empty_editor());
+    owner
+        .breakpoint(at(20), false, &mut empty_editor())
+        .unwrap();
     assert_eq!(owner.breakpoint_refresh.len(), 1);
     assert!(!owner.latest_breakpoints.contains_key(&path));
     while adapter.control().is_some() {}
-    owner.try_event();
+    owner.try_event(&empty_editor());
     assert!(
         matches!(adapter.control(), Some(DapControl::SetBreakpoints {
         path: sent, breakpoints,
@@ -2113,10 +2267,10 @@ fn breakpoint_changes_retry_the_latest_configuration_after_backpressure() {
     assert!(owner.breakpoint_refresh.is_empty());
     assert!(adapter.control().is_none());
     while owner.control(DapControl::Threads).is_ok() {}
-    owner.breakpoint(at(20), true).unwrap();
-    owner.breakpoint(at(10), true).unwrap();
+    owner.breakpoint(at(20), true, &mut empty_editor()).unwrap();
+    owner.breakpoint(at(10), true, &mut empty_editor()).unwrap();
     while adapter.control().is_some() {}
-    owner.try_event();
+    owner.try_event(&empty_editor());
     assert!(
         matches!(adapter.control(), Some(DapControl::SetBreakpoints {
         breakpoints, ..
@@ -2138,30 +2292,36 @@ fn startup_breakpoints_reset_enabled_verdicts_for_the_new_adapter() {
         log_message: None,
     };
     for line in [10, 20] {
-        owner.breakpoint(at(line), false).unwrap();
+        owner
+            .breakpoint(at(line), false, &mut empty_editor())
+            .unwrap();
         adapter.control();
     }
-    owner.set_breakpoint_disabled(&path, 20, true);
+    owner.set_breakpoint_disabled(&path, 20, true, &empty_editor());
     adapter.control();
     owner.apply_breakpoints(
         &path,
         &[at(10)],
         &DapResponse::Breakpoints(vec![(true, Some(11), None)]),
+        &empty_editor(),
     );
     owner.stop().unwrap();
     let (service, _adapter) = crate::debugger::test_session();
     owner.service = service;
     assert_eq!(
-        owner.breakpoint_state(&path, 10),
+        owner.breakpoint_state(&path, 10, &empty_editor()),
         Some(DapBreakpointState::Verified { line: 11 })
     );
-    assert_eq!(owner.startup_breakpoints(), [(path.clone(), vec![at(10)])]);
     assert_eq!(
-        owner.breakpoint_state(&path, 10),
+        owner.startup_breakpoints(&empty_editor()),
+        [(path.clone(), vec![at(10)])]
+    );
+    assert_eq!(
+        owner.breakpoint_state(&path, 10, &empty_editor()),
         Some(DapBreakpointState::Requested { accepted: true })
     );
     assert_eq!(
-        owner.breakpoint_state(&path, 20),
+        owner.breakpoint_state(&path, 20, &empty_editor()),
         Some(DapBreakpointState::Disabled)
     );
 }
@@ -2191,10 +2351,11 @@ fn restoring_breakpoints_clears_removed_adapter_paths_and_old_verdicts() {
                     log_message: None,
                 },
                 false,
+                &mut empty_editor(),
             )
             .unwrap();
         adapter.control();
-        owner.set_breakpoint_disabled(path, 10, true);
+        owner.set_breakpoint_disabled(path, 10, true, &empty_editor());
         adapter.control();
     }
     while owner.control(DapControl::Threads).is_ok() {}
@@ -2202,6 +2363,7 @@ fn restoring_breakpoints_clears_removed_adapter_paths_and_old_verdicts() {
         vec![PersistedBreakpoint {
             path: kept.clone(),
             line: 10,
+            disabled: false,
             column: None,
             condition: None,
             hit_condition: None,
@@ -2209,15 +2371,15 @@ fn restoring_breakpoints_clears_removed_adapter_paths_and_old_verdicts() {
         }],
         Vec::new(),
         &workspace,
+        &mut empty_editor(),
     );
-    assert_eq!(owner.breakpoint_state(&old, 10), None);
+    assert_eq!(owner.breakpoint_state(&old, 10, &empty_editor()), None);
     assert_eq!(
-        owner.breakpoint_state(&kept, 10),
+        owner.breakpoint_state(&kept, 10, &empty_editor()),
         Some(DapBreakpointState::Requested { accepted: true })
     );
-    assert!(owner.disabled_breakpoints.is_empty());
     while adapter.control().is_some() {}
-    owner.try_event();
+    owner.try_event(&empty_editor());
     let mut sent = BTreeMap::new();
     while let Some(DapControl::SetBreakpoints { path, breakpoints }) = adapter.control() {
         sent.insert(path, breakpoints);
@@ -2225,13 +2387,13 @@ fn restoring_breakpoints_clears_removed_adapter_paths_and_old_verdicts() {
     assert!(sent[&old].is_empty());
     assert_eq!(sent[&kept].len(), 1);
     assert_eq!(sent.len(), 2);
-    owner.restore(Vec::new(), Vec::new(), &workspace);
+    owner.restore(Vec::new(), Vec::new(), &workspace, &mut empty_editor());
     assert!(
         matches!(adapter.control(), Some(DapControl::SetBreakpoints {
         path, breakpoints,
     }) if path == kept && breakpoints.is_empty())
     );
-    assert!(owner.breakpoint_states.is_empty());
+    assert!(owner.breakpoints.is_empty());
 }
 
 #[test]
@@ -2244,7 +2406,7 @@ fn new_watches_without_source_paths_retry_after_backpressure() {
     owner.add_watch("fresh".into());
     assert_eq!(owner.watch_refresh, ["fresh"]);
     while adapter.control().is_some() {}
-    owner.try_event();
+    owner.try_event(&empty_editor());
     assert!(matches!(adapter.control(), Some(DapControl::Evaluate {
         expression, frame_id: Some(42), context,
     }) if expression == "fresh" && context == "watch"));
@@ -2277,7 +2439,7 @@ fn removed_watches_drop_queued_cached_and_late_values() {
             response: evaluation("late"),
         },
     );
-    let DapEvent::Response { response, .. } = owner.try_event().unwrap() else {
+    let DapEvent::Response { response, .. } = owner.try_event(&empty_editor()).unwrap() else {
         panic!()
     };
     assert!(matches!(owner.response(response), DebugResponse::Absorbed));
@@ -2332,7 +2494,7 @@ fn automatic_stop_following_only_consumes_its_own_requests() {
             thread_id: Some(1),
         },
     );
-    owner.try_event().unwrap();
+    owner.try_event(&empty_editor()).unwrap();
     owner.control(DapControl::Threads).unwrap();
     let user_threads = adapter.control().unwrap();
     assert!(matches!(
@@ -2552,7 +2714,7 @@ fn selecting_a_frame_refreshes_locals_and_watches_and_rejects_old_frame_answers(
                 },
             );
             assert!(
-                owner.try_event().is_none(),
+                owner.try_event(&empty_editor()).is_none(),
                 "old frame response was not discarded"
             );
         }
@@ -2676,7 +2838,7 @@ fn selecting_the_same_frame_invalidates_previous_automatic_inspector_requests() 
             },
         );
         assert!(
-            owner.try_event().is_none(),
+            owner.try_event(&empty_editor()).is_none(),
             "superseded automatic response became a picker"
         );
         assert_eq!(owner.follow_request, Some(scopes_id));

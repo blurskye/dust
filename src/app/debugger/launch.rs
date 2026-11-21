@@ -516,6 +516,7 @@ impl Debugger {
         policy: &DebugConfig,
         revision: u64,
         tools: &[ToolEntry],
+        editor: &crate::editor::EditorState,
     ) -> Result<Option<String>, String> {
         let Some(mut launch) = self.launch.take() else {
             return Ok(None);
@@ -579,7 +580,7 @@ impl Debugger {
                 // Read the identity FIRST: the request construction below moves fields out of the
                 // intent, and the identity must describe what was actually asked for.
                 let target = launch.identity();
-                let breakpoints = self.startup_breakpoints();
+                let breakpoints = self.startup_breakpoints(editor);
                 let reservation = self.service.reservation().map_err(|e| e.to_string())?;
                 let mut paths = vec![launch.cwd.clone()];
                 if let Some(program) = &launch.program {
@@ -906,6 +907,7 @@ mod tests {
                 &policy,
                 1,
                 &[],
+                &crate::editor::EditorState::new(PathBuf::new()),
             )
             .unwrap();
         assert!(matches!(
@@ -955,7 +957,8 @@ mod tests {
                     workspace.execution_lane(DiscoveryKind::Debugger),
                     &policy,
                     2,
-                    &[]
+                    &[],
+                    &crate::editor::EditorState::new(PathBuf::new()),
                 )
                 .is_err(),
             "configuration revision substitution accepted original launch"
@@ -1038,6 +1041,7 @@ mod tests {
                 &policy,
                 1,
                 &[],
+                &crate::editor::EditorState::new(PathBuf::new()),
             )
             .unwrap();
         let deadline = Instant::now() + Duration::from_secs(20);
@@ -1064,6 +1068,7 @@ mod tests {
                 &policy,
                 1,
                 &[],
+                &crate::editor::EditorState::new(PathBuf::new()),
             )
             .unwrap();
         let target = owner
@@ -1206,9 +1211,10 @@ mod tests {
                             &policy,
                             1,
                             &tools,
+                            &crate::editor::EditorState::new(PathBuf::new()),
                         )
                         .unwrap();
-                    match owner.try_event() {
+                    match owner.try_event(&crate::editor::EditorState::new(PathBuf::new())) {
                         Some(crate::debugger::DapEvent::Stopped { .. }) => break,
                         Some(crate::debugger::DapEvent::Failed { message, .. }) => {
                             panic!("{message}")

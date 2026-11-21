@@ -169,6 +169,8 @@ pub struct PersistedBreakpoint {
     #[serde(with = "crate::files::path_encoding")]
     pub path: PathBuf,
     pub line: u64,
+    #[serde(default)]
+    pub disabled: bool,
     pub column: Option<u64>,
     pub condition: Option<String>,
     pub hit_condition: Option<String>,
@@ -1081,6 +1083,7 @@ mod tests {
         state.breakpoints = vec![crate::persistence::PersistedBreakpoint {
             path: path.clone(),
             line: 1,
+            disabled: false,
             column: None,
             condition: None,
             hit_condition: None,

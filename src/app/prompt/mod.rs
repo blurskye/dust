@@ -216,7 +216,9 @@ impl App {
                 view.scroll_column = column;
             }
         }
-        self.input.take_pending_breakpoint();
+        if let Some((_, location)) = self.input.take_pending_breakpoint() {
+            location.remove_mark(&mut self.state);
+        }
         if self
             .input
             .prompt()
@@ -568,10 +570,15 @@ impl App {
             PromptKind::BreakpointCondition => {
                 let row = self.input.take_pending_breakpoint();
                 self.close_prompt();
-                if let Some(mut row) = row {
+                if let Some((mut row, location)) = row {
+                    row.line = location.line(&row.path, &self.state);
+                    location.remove_mark(&mut self.state);
                     let condition = prompt.input.trim();
                     row.condition = (!condition.is_empty()).then(|| condition.to_owned());
-                    if let Err(error) = self.debugger_session.breakpoint(row, false) {
+                    if let Err(error) =
+                        self.debugger_session
+                            .breakpoint(row, false, &mut self.state)
+                    {
                         self.show_error(error);
                     }
                 }

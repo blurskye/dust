@@ -310,9 +310,13 @@ impl App {
             )?
         };
         self.persistence.reconcile_marks(&self.state);
+        self.debugger_session
+            .sync_breakpoint_locations(&mut self.state);
         *self.state = self
             .window_session
             .accept_editor_transition(transition, &current, &catalog)?;
+        self.debugger_session
+            .sync_breakpoint_locations(&mut self.state);
         self.persistence.reconcile_marks(&self.state);
         self.reconcile_editor_windows();
         Ok(())
@@ -716,12 +720,86 @@ impl App {
 }
 
 impl App {
-    pub(in crate::app) fn ensure_cursor_visible(&mut self) {
-        self.reconcile_editor_windows();
-        self.sync_flash_ui();
-        let Some(view_id) = self.state.active_view() else {
+    pub(in crate::app) fn project_motion_folds(&mut self, invocation: &CommandInvocation) {
+        if matches!(
+            invocation.id.as_str(),
+            "view.cursor.move" | "edit.operator" | "multi.move"
+        ) && matches!(
+            invocation.arguments.get("motion"),
+            Some(CommandValue::String(motion)) if matches!(motion.as_str(), "up" | "down")
+        ) && let Some(view_id) = invocation.target.view
+            && let Some(view) = self.state.views.get(view_id)
+        {
+            let text = &self.state.buffers[view.buffer].text;
+            let folds = VisualRowModel::folded_lines(text, view_id, &self.ui);
+            if folds != view.folded_lines {
+                self.state.views[view_id].folded_lines = folds;
+            }
+        }
+    }
+
+    /// Closing a fold must put its cursor on the header, not leave it hidden.
+    pub(in crate::app) fn place_cursor_at_fold_header(&mut self, view_id: ViewId) {
+        let view = &self.state.views[view_id];
+        let text = &self.state.buffers[view.buffer].text;
+        let Ok(line) = text.byte_to_line(view.cursor) else {
             return;
         };
+        let header = VisualRowModel::folded_lines(text, view_id, &self.ui).header(line);
+        if header != line
+            && let Ok(position) = text.line_to_byte(header)
+        {
+            let transaction = EditorTransaction::new(self.transaction_id())
+                .with_operation(EditorOperation::SetCursor {
+                    view: view_id,
+                    position,
+                })
+                .with_undo_policy(UndoPolicy::Ignore);
+            if let Err(error) = self.state.apply_transaction(&transaction) {
+                self.show_error(error);
+            }
+        }
+    }
+
+    /// A cursor placed explicitly inside a fold reveals its destination.
+    pub(in crate::app) fn reveal_cursor_fold(&mut self, view_id: ViewId) {
+        let Some(view) = self.state.views.get(view_id) else {
+            return;
+        };
+        let text = &self.state.buffers[view.buffer].text;
+        let Ok(line) = text.byte_to_line(view.cursor) else {
+            return;
+        };
+        let hides_cursor = |fold: &crate::ui::UiFold| {
+            fold.view == view_id
+                && fold.collapsed
+                && fold.start_line < line
+                && line <= fold.end_line
+        };
+        if self
+            .ui
+            .lsp_folds
+            .iter()
+            .chain(&self.ui.syntax_folds)
+            .any(hides_cursor)
+        {
+            let ui = &mut *self.ui;
+            for fold in ui.lsp_folds.iter_mut().chain(&mut ui.syntax_folds) {
+                if hides_cursor(fold) {
+                    fold.collapsed = false;
+                }
+            }
+        }
+    }
+
+    pub(in crate::app) fn ensure_cursor_visible(&mut self) {
+        self.reconcile_editor_windows();
+        let Some(view_id) = self.state.active_view() else {
+            self.sync_flash_ui();
+            return;
+        };
+        self.reveal_cursor_fold(view_id);
+        self.sync_flash_ui();
         let view = &self.state.views[view_id];
         let buffer = &self.state.buffers[view.buffer];
         let line = buffer.text.byte_to_line(view.cursor).unwrap_or(0);

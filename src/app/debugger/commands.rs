@@ -428,8 +428,7 @@ impl App {
                 };
                 let row = self
                     .debugger_session
-                    .breakpoint_at(&path, line)
-                    .cloned()
+                    .breakpoint_at(&path, line, &self.state)
                     .unwrap_or(DapSourceBreakpoint {
                         path,
                         line,
@@ -442,7 +441,12 @@ impl App {
                     PromptKind::BreakpointCondition,
                     row.condition.clone().unwrap_or_default(),
                 );
-                self.input.set_pending_breakpoint(row);
+                if let Some((_, location)) = self.input.take_pending_breakpoint() {
+                    location.remove_mark(&mut self.state);
+                }
+                let location =
+                    super::BreakpointLocation::attach(&row.path, row.line, &mut self.state);
+                self.input.set_pending_breakpoint(row, location);
             }
             AppEffect::DapBreakpointConfigure {
                 condition,
@@ -474,6 +478,7 @@ impl App {
                         log_message: None,
                     },
                     true,
+                    &mut self.state,
                 ) {
                     // The sign in the gutter is the answer.
                     Ok(_) => self.project_debug_panes(),

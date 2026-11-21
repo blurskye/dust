@@ -144,6 +144,7 @@ pub(in crate::app) fn delayed_persistence_preserves_newer_runtime_breakpoint_and
         .map(|line| PersistedBreakpoint {
             path: path.clone(),
             line,
+            disabled: false,
             column: None,
             condition: Some("saved".into()),
             hit_condition: None,
@@ -169,7 +170,7 @@ pub(in crate::app) fn delayed_persistence_preserves_newer_runtime_breakpoint_and
         log_message: None,
     };
     app.debugger_session
-        .breakpoint(row(2, "old"), false)
+        .breakpoint(row(2, "old"), false, &mut app.state)
         .unwrap();
     app.debugger_session.add_watch("removed".into());
     app.load_persistence();
@@ -180,10 +181,10 @@ pub(in crate::app) fn delayed_persistence_preserves_newer_runtime_breakpoint_and
         .select_version("rust-analyzer", "0.3.3025".into())
         .unwrap();
     app.debugger_session
-        .breakpoint(row(1, "new"), false)
+        .breakpoint(row(1, "new"), false, &mut app.state)
         .unwrap();
     app.debugger_session
-        .breakpoint(row(2, "old"), true)
+        .breakpoint(row(2, "old"), true, &mut app.state)
         .unwrap();
     app.debugger_session.add_watch("live".into());
     app.debugger_session.remove_watch("removed");
@@ -205,7 +206,7 @@ pub(in crate::app) fn delayed_persistence_preserves_newer_runtime_breakpoint_and
             .map(String::as_str),
         Some("0.3.3025")
     );
-    let breakpoints = app.debugger_session.persisted_breakpoints();
+    let breakpoints = app.debugger_session.persisted_breakpoints(&app.state);
     assert_eq!(breakpoints.len(), 2);
     assert!(
         breakpoints
@@ -1147,7 +1148,7 @@ pub(in crate::app) fn invalid_user_keymap_set_is_rejected_transactionally() {
         &app.configuration.settings().input.keymaps,
     );
     assert!(keymaps.has_bindings());
-    assert!(diagnostic.is_some_and(|message| message.contains("keeping bundled keymaps")));
+    assert!(diagnostic.is_some_and(|message| message.contains("so the default keys are on")));
 
     let before = app.configuration.keymaps().clone();
     let revision = app.configuration.binding_revision();
