@@ -334,8 +334,8 @@ impl GitScreen {
                 )
             }
             Op::Undo(undo) => {
-                // The reflog may have moved since the sheet opened: plan again and compare.
-                if history::undo(&self.root, undo.redo).ok().as_ref() != Some(&undo) {
+                // Recheck HEAD and staged changes before running the confirmed plan.
+                if history::undo(&self.root, undo.redo)? != undo {
                     return Err("The reflog changed; cancel and press the key again".into());
                 }
                 let (_, to) = undo.head();

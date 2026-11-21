@@ -1,8 +1,14 @@
 //! Pull, undo and redo, history rewriting and tag push. Each is a plan the
 //! Git tab shows in a confirm sheet, then runs as one `git` command with the arguments and
 //! environment built here. Nothing in this module writes to the repository.
-use git2::{Oid, Repository, RepositoryState};
+use git2::{
+    DiffOptions, FileMode, Index, IndexEntryExtendedFlag, IndexEntryFlag, IndexTime, Oid,
+    Repository, RepositoryState,
+};
+use std::collections::BTreeSet;
 use std::ffi::OsString;
+use std::fs;
+use std::io::ErrorKind;
 use std::path::Path;
 
 /// One `git` invocation: its arguments and the variables it adds to Git's environment.
@@ -210,8 +216,9 @@ impl Undo {
         if self.redo { (from, to) } else { (to, from) }
     }
 
-    /// `git reset --keep` refuses rather than overwrite uncommitted changes; a branch switch
-    /// switches back. The reflog entry is tagged so the next `z` walks further back.
+    /// Builds the command for display or execution after rechecking the plan with `undo`.
+    /// `reset --keep` protects the working copy, not the index; `checkout` as a branch
+    /// switch also protects staged changes. Tag the reflog entry so `z` can walk back.
     pub fn run(&self) -> Run {
         let action = if self.redo { REDO_ACTION } else { UNDO_ACTION };
         let run = match &self.moved {
@@ -226,6 +233,105 @@ impl Undo {
         };
         run.with("GIT_REFLOG_ACTION", action)
     }
+}
+
+/// A reset replaces the index even for paths unchanged between the two commits.
+fn check_staged(repository: &Repository, head: Oid) -> Result<(), String> {
+    let unreadable = "Can't check staged changes. Nothing was changed.";
+    let workdir = repository.workdir().ok_or(unreadable)?;
+    let tree = repository
+        .find_commit(head)
+        .and_then(|commit| commit.tree())
+        .map_err(|_| unreadable)?;
+    let mut index = repository.index().map_err(|_| unreadable)?;
+    // libgit2 can omit added entries marked assume-unchanged from the staged diff.
+    // Clear that flag in this read-only snapshot, not in the on-disk index.
+    let assume_unchanged = IndexEntryFlag::VALID.bits();
+    let hidden: Vec<_> = index
+        .iter()
+        .filter(|entry| entry.flags & assume_unchanged != 0)
+        .collect();
+    for mut entry in hidden {
+        entry.flags &= !assume_unchanged;
+        index.add(&entry).map_err(|_| unreadable)?;
+    }
+    let staged = repository
+        .diff_tree_to_index(
+            Some(&tree),
+            Some(&index),
+            Some(DiffOptions::new().include_typechange(true)),
+        )
+        .map_err(|_| unreadable)?;
+
+    // Diff just the staged paths, without flags or cached stat data that can
+    // hide differences in the working copy. Never update the real index.
+    let mut compare = Index::new().map_err(|_| unreadable)?;
+    let mut options = DiffOptions::new();
+    options
+        .disable_pathspec_match(true)
+        .include_typechange(true);
+    let mut mismatches = BTreeSet::new();
+    for delta in staged.deltas() {
+        let path = delta.new_file().path().ok_or(unreadable)?;
+        let disk = workdir.join(path);
+        let entry = index
+            .get_path(path, 0)
+            .filter(|entry| Some(entry.path.as_slice()) == delta.new_file().path_bytes());
+        if let Some(mut entry) = entry {
+            if IndexEntryExtendedFlag::from_bits_truncate(entry.flags_extended).is_intent_to_add() {
+                continue;
+            }
+            if entry.mode == u32::from(FileMode::Commit) {
+                // Compare the checked-out commit even when Git is set to ignore submodule changes.
+                let checked_out =
+                    Repository::open(&disk).and_then(|repo| repo.head().map(|head| head.target()));
+                if checked_out.ok().flatten() != Some(entry.id) {
+                    mismatches.insert(path.to_owned());
+                }
+                continue;
+            }
+            entry.flags = 0;
+            entry.flags_extended = 0;
+            entry.mtime = IndexTime::new(0, 0);
+            entry.ino = 0;
+            entry.file_size = 0;
+            compare.add(&entry).map_err(|_| unreadable)?;
+            options.pathspec(path);
+        } else {
+            // A staged deletion also matches if the old file was replaced by a directory.
+            match fs::symlink_metadata(&disk) {
+                Ok(metadata)
+                    if metadata.is_dir() && delta.old_file().mode() != FileMode::Commit => {}
+                Ok(_) => {
+                    mismatches.insert(path.to_owned());
+                }
+                Err(error)
+                    if matches!(error.kind(), ErrorKind::NotFound | ErrorKind::NotADirectory) => {}
+                Err(_) => return Err(unreadable.into()),
+            }
+        }
+    }
+
+    if !compare.is_empty() {
+        let working = repository
+            .diff_index_to_workdir(Some(&compare), Some(&mut options))
+            .map_err(|_| unreadable)?;
+        for delta in working.deltas() {
+            mismatches.insert(delta.old_file().path().ok_or(unreadable)?.to_owned());
+        }
+    }
+    if let Some(path) = mismatches.first() {
+        let more = if mismatches.len() > 1 {
+            format!(" (and {} more)", mismatches.len() - 1)
+        } else {
+            String::new()
+        };
+        return Err(format!(
+            "Undo would drop staged changes in {}{more}. Commit or unstage them first.",
+            path.display()
+        ));
+    }
+    Ok(())
 }
 
 /// A rebase's (or `pull --rebase`'s) step word: `start`, `pick`, `finish`, `abort`.
@@ -273,16 +379,17 @@ pub fn undo(root: &Path, redo: bool) -> Result<Undo, String> {
                 from: from.to_owned(),
                 to: to.trim_end().to_owned(),
             })
-        } else if [
-            "commit",
-            "reset: moving to",
-            "pull",
-            "merge",
-            "cherry-pick",
-            "revert",
-        ]
-        .iter()
-        .any(|prefix| message.starts_with(prefix))
+        } else if message == crate::rewrite::REFLOG_ACTION
+            || [
+                "commit",
+                "reset: moving to",
+                "pull",
+                "merge",
+                "cherry-pick",
+                "revert",
+            ]
+            .iter()
+            .any(|prefix| message.starts_with(prefix))
         {
             Some(Move::Commit { from: old, to: new })
         } else {
@@ -310,11 +417,15 @@ pub fn undo(root: &Path, redo: bool) -> Result<Undo, String> {
                 entry: message.trim_end().to_owned(),
                 moved,
             };
-            if let Move::Commit { from, .. } = &undo.moved
-                && from.is_zero()
-                && !redo
-            {
-                return Err("The first commit has nothing before it to return to".into());
+            if let Move::Commit { from, to } = undo.moved {
+                let expected_head = if redo { from } else { to };
+                if repository.head().ok().and_then(|head| head.target()) != Some(expected_head) {
+                    return Err("Undo can't follow the last change to HEAD.".into());
+                }
+                if !redo && from.is_zero() {
+                    return Err("The first commit has nothing before it to return to".into());
+                }
+                check_staged(&repository, expected_head)?;
             }
             return Ok(undo);
         }
@@ -724,6 +835,103 @@ mod tests {
         // Undo after the redos starts from the newest action again.
         run(root, &undo(root, false).unwrap().run());
         assert_eq!(head(root), b);
+    }
+
+    #[test]
+    fn undo_and_redo_refuse_to_drop_index_only_content() {
+        let dir = repo();
+        let root = dir.path();
+        let base = commit(root, "edit.txt");
+        let tip = commit(root, "history.txt");
+        // Capture the redo plan's source while the checkout is still clean.
+        run(root, &undo(root, false).unwrap().run());
+
+        for (redo, current, target) in [(true, base, tip), (false, tip, base)] {
+            fs::write(root.join("edit.txt"), "staged only\n").unwrap();
+            git(root, &["add", "edit.txt"]);
+            fs::write(root.join("edit.txt"), "edit.txt\n").unwrap();
+            assert_eq!(
+                undo(root, redo).unwrap_err(),
+                "Undo would drop staged changes in edit.txt. Commit or unstage them first."
+            );
+
+            fs::write(root.join("new.txt"), "new staged file\n").unwrap();
+            git(root, &["add", "new.txt"]);
+            git(root, &["update-index", "--assume-unchanged", "new.txt"]);
+            fs::remove_file(root.join("new.txt")).unwrap();
+            let index = fs::read(root.join(".git/index")).unwrap();
+            assert_eq!(
+                undo(root, redo).unwrap_err(),
+                "Undo would drop staged changes in edit.txt (and 1 more). Commit or unstage them first."
+            );
+            assert_eq!(fs::read(root.join(".git/index")).unwrap(), index);
+            assert_eq!(git(root, &["show", ":edit.txt"]), "staged only");
+            assert_eq!(git(root, &["show", ":new.txt"]), "new staged file");
+            assert_eq!(fs::read(root.join("edit.txt")).unwrap(), b"edit.txt\n");
+            assert!(!root.join("new.txt").exists());
+            assert_eq!(head(root), current);
+
+            // Once the replacement is also on disk, reset may unstage it.
+            git(root, &["reset", "-q", "HEAD", "--", "new.txt"]);
+            fs::write(root.join("edit.txt"), "staged only\n").unwrap();
+            run(root, &undo(root, redo).unwrap().run());
+            assert_eq!(head(root), target);
+            assert_eq!(fs::read(root.join("edit.txt")).unwrap(), b"staged only\n");
+        }
+    }
+
+    #[test]
+    fn undo_targets_the_commit_before_a_native_amend_and_refuses_an_unknown_move() {
+        let dir = repo();
+        let root = dir.path();
+        commit(root, "base");
+        let before = commit(root, "edit.txt");
+        fs::write(root.join("edit.txt"), "amended\n").unwrap();
+        git(root, &["add", "edit.txt"]);
+        // Publish the rewritten commit with the message used by the native rewrite.
+        let tree = git(root, &["write-tree"]);
+        let amended = git(
+            root,
+            &["commit-tree", &tree, "-p", "HEAD^", "-m", "amended"],
+        );
+        git(
+            root,
+            &[
+                "update-ref",
+                "-m",
+                crate::rewrite::REFLOG_ACTION,
+                "HEAD",
+                &amended,
+            ],
+        );
+        let amended = head(root);
+
+        let plan = undo(root, false).unwrap();
+        assert_eq!(
+            plan.moved,
+            Move::Commit {
+                from: before,
+                to: amended
+            }
+        );
+        run(root, &plan.run());
+        assert_eq!(head(root), before);
+
+        git(
+            root,
+            &[
+                "update-ref",
+                "-m",
+                "unknown move",
+                "HEAD",
+                &amended.to_string(),
+            ],
+        );
+        assert_eq!(
+            undo(root, false).unwrap_err(),
+            "Undo can't follow the last change to HEAD."
+        );
+        assert_eq!(head(root), amended);
     }
 
     #[test]

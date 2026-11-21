@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::time::Duration;
 
+pub(crate) const REFLOG_ACTION: &str = "dusty: local commit rewrite";
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Kind {
     Amend,
@@ -397,12 +399,7 @@ fn execute(plan: Plan, message: String) -> Result<Outcome, String> {
         )
     };
     transaction
-        .set_target(
-            reference,
-            created.id(),
-            Some(&committer),
-            "dusty: local commit rewrite",
-        )
+        .set_target(reference, created.id(), Some(&committer), REFLOG_ACTION)
         .map_err(publication_error)?;
     // Normal branch publication already appends HEAD through libgit2. Keep
     // its HEAD lock, but never append that transition a second time.
@@ -469,7 +466,9 @@ fn raw_reflog_record(old: Oid, created: &git2::Commit<'_>) -> Result<Vec<u8>, St
     }
     let mut record = format!("{old} {} ", created.id()).into_bytes();
     record.extend_from_slice(committer);
-    record.extend_from_slice(b"\tdusty: local commit rewrite\n");
+    record.push(b'\t');
+    record.extend_from_slice(REFLOG_ACTION.as_bytes());
+    record.push(b'\n');
     Ok(record)
 }
 
