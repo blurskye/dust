@@ -2502,6 +2502,16 @@ fn checked_document_write(
         check_document_write_access(path)?;
     }
 
+    if !matches!(expectation, WriteExpectation::Missing)
+        && let Some(identity) = linked_document_identity(path).map_err(|source| VfsError::Io {
+            operation: "inspect write target",
+            path: path.to_path_buf(),
+            source,
+        })?
+    {
+        return write_linked_document(path, bytes, expectation, force, identity);
+    }
+
     #[cfg(windows)]
     if force
         && matches!(expectation, WriteExpectation::Any)
@@ -2512,6 +2522,162 @@ fn checked_document_write(
     }
 
     checked_atomic_write(path, bytes, expectation)
+}
+
+fn linked_document_identity(path: &Path) -> io::Result<Option<(u64, u64)>> {
+    // The document worker already resolves symlinks. Don't follow a new link
+    // substituted after that resolution.
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    if !metadata.is_file() {
+        return Ok(None);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        Ok((metadata.nlink() > 1).then(|| (metadata.dev(), metadata.ino())))
+    }
+    #[cfg(windows)]
+    {
+        let information = winapi_util::file::information(&open_path(path)?)?;
+        Ok((information.number_of_links() > 1)
+            .then(|| (information.volume_serial_number(), information.file_index())))
+    }
+}
+
+fn write_linked_document(
+    path: &Path,
+    bytes: &[u8],
+    expectation: &WriteExpectation,
+    force: bool,
+    identity: (u64, u64),
+) -> Result<(), VfsError> {
+    use crate::files::root_identity::file_identity;
+    use std::io::Seek;
+
+    let write_error = |source| VfsError::Io {
+        operation: "write",
+        path: path.to_path_buf(),
+        source,
+    };
+    let changed = || VfsError::ExternalModification(path.to_path_buf());
+    let open_error = |source: io::Error| {
+        if source.kind() == io::ErrorKind::NotFound {
+            changed()
+        } else {
+            write_error(source)
+        }
+    };
+    let check_identity = |file: &File| {
+        if file_identity(file).map_err(write_error)? != identity {
+            return Err(changed());
+        }
+        Ok(())
+    };
+
+    let parent = write_parent(path);
+    // Keep the staged copy under the temporary file's default permissions;
+    // only the rename path needs to copy the destination's metadata.
+    let mut temporary = write_temporary(path, bytes)?;
+    sync_temporary(&temporary, path)?;
+    sync_parent(parent)?;
+
+    let mut options = fs::OpenOptions::new();
+    options
+        .write(true)
+        .read(matches!(expectation, WriteExpectation::Exact(_)));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(nix::libc::O_NONBLOCK | nix::libc::O_NOFOLLOW);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.custom_flags(0x00200000); // OPEN_REPARSE_POINT
+    }
+
+    let mut write = |mut file: File| {
+        check_identity(&file)?;
+        if let WriteExpectation::Exact(expected) = expectation {
+            let reader = file.try_clone().map_err(write_error)?;
+            if read_open_file_bounded(reader, path, DOCUMENT_BYTE_LIMIT)? != *expected {
+                return Err(changed());
+            }
+            file.rewind().map_err(write_error)?;
+        }
+        // Make sure the name still points to the file we checked before writing.
+        check_identity(&open_path(path).map_err(open_error)?)?;
+        // A hard-linked inode cannot be atomically replaced. Leave the staged
+        // copy behind if writing or syncing the original fails after truncation.
+        file.set_len(0).map_err(write_error)?;
+        if let Err(source) = file.write_all(bytes).and_then(|()| file.sync_all()) {
+            temporary.disable_cleanup(true);
+            return Err(VfsError::IncompleteSave {
+                path: path.to_path_buf(),
+                copy: temporary.path().to_path_buf(),
+                source,
+            });
+        }
+        Ok(())
+    };
+
+    match options.open(path) {
+        Ok(file) => write(file),
+        Err(error)
+            if force
+                && matches!(expectation, WriteExpectation::Any)
+                && error.kind() == io::ErrorKind::PermissionDenied =>
+        {
+            // The rename path can force a save to a read-only destination. For
+            // a linked file, temporarily grant write access to that same inode.
+            #[cfg(target_os = "linux")]
+            let original = open_path(path).map_err(write_error)?;
+            #[cfg(all(unix, not(target_os = "linux")))]
+            let original = open_read_no_symlinks(path).map_err(write_error)?;
+            #[cfg(windows)]
+            let original = {
+                use std::os::windows::fs::OpenOptionsExt;
+                fs::OpenOptions::new()
+                    .access_mode(0x0100) // FILE_WRITE_ATTRIBUTES
+                    .custom_flags(0x00200000) // OPEN_REPARSE_POINT
+                    .open(path)
+                    .map_err(write_error)?
+            };
+            check_identity(&original)?;
+            let permissions = original.metadata().map_err(write_error)?.permissions();
+            let mut writable = permissions.clone();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                writable.set_mode(writable.mode() | 0o200);
+            }
+            #[cfg(windows)]
+            writable.set_readonly(false);
+            let set_permissions = |permissions| {
+                #[cfg(target_os = "linux")]
+                {
+                    use std::os::fd::AsRawFd;
+                    // fchmod doesn't accept an O_PATH handle, but /proc can
+                    // address even a mode-000 file by its held descriptor.
+                    fs::set_permissions(
+                        format!("/proc/self/fd/{}", original.as_raw_fd()),
+                        permissions,
+                    )
+                }
+                #[cfg(not(target_os = "linux"))]
+                original.set_permissions(permissions)
+            };
+            set_permissions(writable).map_err(write_error)?;
+            let result = options.open(path).map_err(open_error).and_then(write);
+            let restored = set_permissions(permissions).map_err(write_error);
+            result.and(restored)
+        }
+        Err(source) => Err(open_error(source)),
+    }
 }
 
 fn check_document_write_access(path: &Path) -> Result<(), VfsError> {
@@ -2878,11 +3044,15 @@ pub fn atomic_write_with_executable(
     commit_atomic_write(path, temporary, &WriteExpectation::Any)
 }
 
-fn stage_atomic_write(path: &Path, bytes: &[u8]) -> Result<NamedTempFile, VfsError> {
-    let parent = path
-        .parent()
+fn write_parent(path: &Path) -> &Path {
+    path.parent()
         .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
+        .unwrap_or_else(|| Path::new("."))
+}
+
+/// Write `bytes` to a new temporary file beside `path`.
+fn write_temporary(path: &Path, bytes: &[u8]) -> Result<NamedTempFile, VfsError> {
+    let parent = write_parent(path);
     let mut temporary = NamedTempFile::new_in(parent).map_err(|source| VfsError::Io {
         operation: "create temporary file",
         path: parent.to_path_buf(),
@@ -2898,6 +3068,11 @@ fn stage_atomic_write(path: &Path, bytes: &[u8]) -> Result<NamedTempFile, VfsErr
         path: path.to_path_buf(),
         source,
     })?;
+    Ok(temporary)
+}
+
+fn stage_atomic_write(path: &Path, bytes: &[u8]) -> Result<NamedTempFile, VfsError> {
+    let temporary = write_temporary(path, bytes)?;
     match fs::metadata(path) {
         Ok(metadata) => {
             #[cfg(unix)]
@@ -2933,6 +3108,11 @@ fn stage_atomic_write(path: &Path, bytes: &[u8]) -> Result<NamedTempFile, VfsErr
             });
         }
     }
+    sync_temporary(&temporary, path)?;
+    Ok(temporary)
+}
+
+fn sync_temporary(temporary: &NamedTempFile, path: &Path) -> Result<(), VfsError> {
     temporary
         .as_file()
         .sync_all()
@@ -2940,8 +3120,7 @@ fn stage_atomic_write(path: &Path, bytes: &[u8]) -> Result<NamedTempFile, VfsErr
             operation: "sync temporary file",
             path: path.to_path_buf(),
             source,
-        })?;
-    Ok(temporary)
+        })
 }
 
 pub(super) fn sync_parent(parent: &Path) -> Result<(), VfsError> {
@@ -2977,6 +3156,49 @@ mod lifecycle_tests {
             thread::sleep(Duration::from_millis(1));
         }
     }
+    #[cfg(unix)]
+    #[test]
+    fn document_save_preserves_hard_links_through_a_symlink() {
+        use std::os::unix::fs::{MetadataExt, symlink};
+
+        let root = tempfile::tempdir().unwrap();
+        let a = root.path().join("a.txt");
+        let b = root.path().join("b.txt");
+        let alias = root.path().join("alias.txt");
+        let old = b"shared before saving\n";
+        let new = b"edited\n";
+        fs::write(&a, old).unwrap();
+        fs::hard_link(&a, &b).unwrap();
+        symlink("a.txt", &alias).unwrap();
+        let original_inode = fs::metadata(&a).unwrap().ino();
+
+        let mut worker = VfsWorker::start(2);
+        worker
+            .write_document(
+                alias.clone(),
+                new.to_vec(),
+                WriteExpectation::Exact(old.to_vec()),
+                false,
+                Some(a.clone()),
+                vec![],
+            )
+            .unwrap();
+        match worker
+            .receiver
+            .recv_timeout(Duration::from_secs(20))
+            .unwrap()
+        {
+            VfsReply::Public(VfsResult::Write { result, .. }) => result.unwrap(),
+            other => panic!("expected save result, got {other:?}"),
+        }
+
+        assert_eq!(fs::read(&a).unwrap(), new);
+        assert_eq!(fs::read(&b).unwrap(), new);
+        assert_eq!(fs::metadata(&a).unwrap().ino(), original_inode);
+        assert_eq!(fs::metadata(&b).unwrap().ino(), original_inode);
+        assert!(fs::symlink_metadata(&alias).unwrap().is_symlink());
+    }
+
     // This test substitutes Unix symlinks.
     #[cfg(unix)]
     #[test]

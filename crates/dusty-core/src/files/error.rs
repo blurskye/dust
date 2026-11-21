@@ -30,6 +30,17 @@ pub enum VfsError {
     )]
     ReadOnlyDestination(PathBuf),
     #[error(
+        "Couldn't finish saving {}, so it may be incomplete. Your edits are in {}.",
+        path.display(),
+        copy.display()
+    )]
+    IncompleteSave {
+        path: PathBuf,
+        copy: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+    #[error(
         "`{}` already exists in `{}`",
         .0.file_name().unwrap_or_default().to_string_lossy(),
         .0.parent().unwrap_or(std::path::Path::new("")).display()
