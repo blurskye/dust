@@ -102,7 +102,6 @@ impl Lanes {
         conditional: Conditional,
         scope: Scope,
         background: bool,
-        kind: Option<crate::forge::model::ItemKind>,
     ) -> Result<(), (Request, String)> {
         let Some(lane) =
             (0..self.count()).find(|&lane| self.running[lane].is_none() && !self.jobs[lane].busy())
@@ -124,7 +123,6 @@ impl Lanes {
                 read.clone(),
                 conditional,
                 background,
-                kind,
             ),
             Op::Write(target, write) => {
                 self.jobs[lane].write(root, id, target.clone(), write.clone())
@@ -289,7 +287,7 @@ mod tests {
         // Queued in the worst order: a cached entry's check, the timeline, then the item.
         workspace.fresh.implicit.insert(Key::Repository);
         workspace.queue.push_back(read(Key::Repository));
-        workspace.queue.push_back(read(Key::Timeline(7)));
+        workspace.queue.push_back(read(Key::IssueTimeline(7)));
         workspace.queue.push_back(read(Key::Item(1, 7)));
         workspace.reconcile_reads();
         let mut order = Vec::new();
@@ -302,7 +300,7 @@ mod tests {
         }
         assert_eq!(
             order,
-            vec![Key::Item(1, 7), Key::Timeline(7), Key::Repository]
+            vec![Key::Item(1, 7), Key::IssueTimeline(7), Key::Repository]
         );
     }
 
@@ -312,7 +310,7 @@ mod tests {
         workspace.active = Lanes::dry_with(1);
         workspace.page = 1;
         workspace.opened = Some((1, 7));
-        workspace.queue.push_back(read(Key::Timeline(7)));
+        workspace.queue.push_back(read(Key::IssueTimeline(7)));
         workspace.queue.push_back(read(Key::Item(1, 7)));
         workspace.reconcile_reads();
         workspace.start_reads();

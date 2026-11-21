@@ -768,7 +768,12 @@ pub fn threads_and_timeline(harness: &Harness) {
     assert_eq!(threads[0].commit.as_deref(), Some(HEAD));
 
     let timeline = some(
-        harness.read(Read::Timeline(13)).unwrap(),
+        harness
+            .read(Read::Timeline {
+                kind: ItemKind::PullRequest,
+                number: 13,
+            })
+            .unwrap(),
         |payload| match payload {
             Payload::Timeline(timeline) => Some(timeline),
             _ => None,
@@ -797,10 +802,14 @@ pub fn threads_and_timeline(harness: &Harness) {
         ]
     );
 
-    // An issue's timeline is read under `issues/`, once the issue was opened.
-    harness.read(Read::Issue(14)).unwrap();
+    // An issue's timeline is read under `issues/`, without a prior detail read.
     let timeline = some(
-        harness.read(Read::Timeline(14)).unwrap(),
+        harness
+            .read(Read::Timeline {
+                kind: ItemKind::Issue,
+                number: 14,
+            })
+            .unwrap(),
         |payload| match payload {
             Payload::Timeline(timeline) => Some(timeline),
             _ => None,
@@ -942,7 +951,7 @@ pub fn comment_labels_and_state(harness: &Harness) {
             assignees: Vec::new(),
         })
         .unwrap();
-    assert_eq!(created.created_number, Some(15));
+    assert_eq!(created.created_item, Some((ItemKind::Issue, 15)));
 
     let mr = format!("{PROJECT}/merge_requests");
     let issues = format!("{PROJECT}/issues");
@@ -1797,7 +1806,10 @@ pub fn read_only_navigation_makes_no_writes(harness: &Harness) {
         Read::PullRequest(13),
         Read::Issue(14),
         Read::Threads(13),
-        Read::Timeline(13),
+        Read::Timeline {
+            kind: ItemKind::PullRequest,
+            number: 13,
+        },
         Read::Diff(13),
         Read::Viewed(13),
         Read::Run {
@@ -1878,7 +1890,10 @@ pub fn transports_agree() {
             Read::PullRequest(13),
             Read::Issue(14),
             Read::Threads(13),
-            Read::Timeline(13),
+            Read::Timeline {
+                kind: ItemKind::PullRequest,
+                number: 13,
+            },
             Read::Diff(13),
             Read::Runs {
                 filter: RunFilter::default(),
@@ -1971,9 +1986,9 @@ fn unordered_reads(mut requests: Vec<String>) -> Vec<String> {
 /// way the reader does, notes and resource events merged into one timeline in time order.
 pub fn conversation_timelines(harness: &Harness) {
     harness.update(|state| state["conversation"] = json!(true));
-    let timeline = |number: u64| {
+    let timeline = |kind, number| {
         some(
-            harness.read(Read::Timeline(number)).unwrap(),
+            harness.read(Read::Timeline { kind, number }).unwrap(),
             |payload| match payload {
                 Payload::Timeline(timeline) => Some(timeline),
                 _ => None,
@@ -1993,7 +2008,7 @@ pub fn conversation_timelines(harness: &Harness) {
         other => panic!("unexpected event {other:?}"),
     };
 
-    let merge_request = timeline(15);
+    let merge_request = timeline(ItemKind::PullRequest, 15);
     let kinds = |events: &[TimelineEvent], pick: fn(&TimelineEvent) -> Option<String>| {
         events.iter().filter_map(pick).collect::<Vec<_>>()
     };
@@ -2072,7 +2087,7 @@ pub fn conversation_timelines(harness: &Harness) {
     );
 
     harness.read(Read::Issue(16)).unwrap();
-    let issue = timeline(16);
+    let issue = timeline(ItemKind::Issue, 16);
     let said = issue
         .iter()
         .filter_map(|event| match event {

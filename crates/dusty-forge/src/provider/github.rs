@@ -1265,7 +1265,7 @@ impl GitHub {
             Read::PullRequest(number) => vec![graphql(PULL_REQUEST_DOCUMENT, *number)?],
             Read::Issue(number) => vec![graphql(ISSUE_DOCUMENT, *number)?],
             Read::Fingerprint(number) => vec![graphql(FINGERPRINT_DOCUMENT, *number)?],
-            Read::Timeline(number) => {
+            Read::Timeline { number, .. } => {
                 vec![rest(&format!("issues/{number}/timeline"))?.query("per_page", PAGE)]
             }
             Read::Threads(number) => vec![graphql(THREADS_DOCUMENT, *number)?],
@@ -1661,7 +1661,7 @@ impl GitHub {
                 let response = ctx.ok(&requests[0], cancel)?;
                 super::artifact_payload(read, &response.body)?
             }
-            Read::Timeline(_) => Payload::Timeline(
+            Read::Timeline { .. } => Payload::Timeline(
                 Self::rest_pages(ctx, requests.remove(0), cancel)?
                     .iter()
                     .map(timeline_event)
@@ -2309,7 +2309,7 @@ impl Provider for GitHub {
         let saved = |summary: &str| Receipt {
             summary: summary.into(),
             web_url: None,
-            created_number: None,
+            created_item: None,
             invalidates: invalidates.clone(),
         };
         match write {
@@ -2423,8 +2423,11 @@ impl Provider for GitHub {
         Ok(Receipt {
             summary: "Saved".into(),
             web_url: optional(&last, "html_url"),
-            created_number: match write {
-                Write::CreateIssue { .. } | Write::CreatePullRequest(_) => last["number"].as_u64(),
+            created_item: match write {
+                Write::CreateIssue { .. } => last["number"].as_u64().map(|n| (ItemKind::Issue, n)),
+                Write::CreatePullRequest(_) => {
+                    last["number"].as_u64().map(|n| (ItemKind::PullRequest, n))
+                }
                 _ => None,
             },
             invalidates,

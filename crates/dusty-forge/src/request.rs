@@ -122,7 +122,10 @@ pub enum Read {
     Fingerprint(u64),
     /// Several fingerprints at once (freshness polls), batched like `PullRequests`.
     Fingerprints(Vec<u64>),
-    Timeline(u64),
+    Timeline {
+        kind: ItemKind,
+        number: u64,
+    },
     Threads(u64),
     Diff(u64),
     CommitDiff(String),
@@ -179,7 +182,7 @@ impl Read {
             | Read::Issue(_)
             | Read::Fingerprint(_)
             | Read::Fingerprints(_)
-            | Read::Timeline(_)
+            | Read::Timeline { .. }
             | Read::Threads(_)
             | Read::Diff(_)
             | Read::Viewed(_)
@@ -220,7 +223,7 @@ impl Read {
             Read::PullRequest(number)
             | Read::Issue(number)
             | Read::Fingerprint(number)
-            | Read::Timeline(number)
+            | Read::Timeline { number, .. }
             | Read::Threads(number)
             | Read::Diff(number)
             | Read::Viewed(number) => Some(*number),
@@ -462,6 +465,7 @@ impl Write {
             ItemKind::Issue => Read::Issue(number),
             ItemKind::PullRequest => Read::PullRequest(number),
         };
+        let timeline = |kind, number| Read::Timeline { kind, number };
         match self {
             Write::Edit { kind, number, .. }
             | Write::SetState { kind, number, .. }
@@ -469,18 +473,19 @@ impl Write {
             | Write::SetAssignees { kind, number, .. }
             | Write::SetMilestone { kind, number, .. }
             | Write::SetProjects { kind, number, .. }
-            | Write::Subscribe { kind, number, .. } => {
-                vec![item(*kind, *number), Read::Timeline(*number)]
-            }
-            Write::Comment { kind, number, .. } => {
-                vec![item(*kind, *number), Read::Timeline(*number)]
+            | Write::Subscribe { kind, number, .. }
+            | Write::Comment { kind, number, .. } => {
+                vec![item(*kind, *number), timeline(*kind, *number)]
             }
             Write::SetReviewers { number, .. } | Write::Merge { number, .. } => {
-                vec![Read::PullRequest(*number), Read::Timeline(*number)]
+                vec![
+                    Read::PullRequest(*number),
+                    timeline(ItemKind::PullRequest, *number),
+                ]
             }
             Write::SubmitReview { number, .. } => vec![
                 Read::PullRequest(*number),
-                Read::Timeline(*number),
+                timeline(ItemKind::PullRequest, *number),
                 Read::Threads(*number),
             ],
             Write::InlineComment { number, .. } | Write::Reply { number, .. } => {
@@ -488,7 +493,7 @@ impl Write {
             }
             Write::CommitSuggestion { number, .. } => vec![
                 Read::PullRequest(*number),
-                Read::Timeline(*number),
+                timeline(ItemKind::PullRequest, *number),
                 Read::Threads(*number),
                 Read::Diff(*number),
             ],
@@ -567,7 +572,7 @@ pub enum Payload {
 pub struct Receipt {
     pub summary: String,
     pub web_url: Option<String>,
-    pub created_number: Option<u64>,
+    pub created_item: Option<(ItemKind, u64)>,
     #[serde(skip)]
     pub invalidates: Vec<Read>,
 }
@@ -711,7 +716,16 @@ mod tests {
             number: 7,
             body: "x".into(),
         };
-        assert_eq!(write.invalidates(), [Read::Issue(7), Read::Timeline(7)]);
+        assert_eq!(
+            write.invalidates(),
+            [
+                Read::Issue(7),
+                Read::Timeline {
+                    kind: ItemKind::Issue,
+                    number: 7
+                }
+            ]
+        );
         assert!(write.optimistic() && !write.porcelain());
     }
 }

@@ -147,23 +147,8 @@ pub fn fetch_through(
         Some(cache) => crate::incremental::prepare(provider, ctx, cache, &key, read, conditional),
         None => (conditional, None),
     };
-    // GitLab numbers issues and merge requests apart and `Read::Timeline` names only the
-    // number: after a restart the kind comes from the disk, not a guess.
-    let gitlab = provider.kind() == crate::provider::ProviderKind::GitLab;
-    if gitlab && let (Read::Timeline(number), Some(cache)) = (read, &cache) {
-        crate::provider::gitlab::restore_kind(ctx, cache, *number);
-    }
     let started = cache::now_ms();
     let result = crate::inflight::read(provider, ctx, read, &conditional, cancel);
-    if gitlab
-        && result.is_ok()
-        && let (
-            Read::Issue(number) | Read::PullRequest(number) | Read::Fingerprint(number),
-            Some(cache),
-        ) = (read, &cache)
-    {
-        crate::provider::gitlab::keep_kind(ctx, cache, *number);
-    }
     let result = match (result, base) {
         (Ok(fetched), Some(base)) => Ok(crate::incremental::merge(read, base, fetched)),
         (result, _) => result,
@@ -362,22 +347,11 @@ impl ForgeJobs {
         conditional: Conditional,
     ) -> Result<(), String> {
         let background = self.warming();
-        self.fetch_as(
-            root,
-            request_id,
-            target,
-            read,
-            conditional,
-            background,
-            None,
-        )
+        self.fetch_as(root, request_id, target, read, conditional, background)
     }
 
     /// `fetch`, as background work when nobody waits for the answer (a cached entry being
-    /// checked): its requests then yield to the ones somebody does wait for. `kind` is what
-    /// the asker knows the numbered item is (GitLab numbers issues and merge requests apart,
-    /// and `Read::Timeline` names only the number).
-    #[allow(clippy::too_many_arguments)]
+    /// checked): its requests then yield to the ones somebody does wait for.
     pub fn fetch_as(
         &mut self,
         root: PathBuf,
@@ -386,16 +360,10 @@ impl ForgeJobs {
         read: Read,
         conditional: Conditional,
         background: bool,
-        kind: Option<crate::model::ItemKind>,
     ) -> Result<(), String> {
         self.spawn(root, request_id, move |root, commands| {
             let result = connect(root, &target, commands.cancelled).and_then(|(provider, ctx)| {
                 ctx.set_background(background);
-                if let (Some(kind), Read::Timeline(number)) = (kind, &read)
-                    && provider.kind() == crate::provider::ProviderKind::GitLab
-                {
-                    crate::provider::gitlab::note_kind(&ctx, *number, kind);
-                }
                 fetch_through(
                     provider.as_ref(),
                     &ctx,

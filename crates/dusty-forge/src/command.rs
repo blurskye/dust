@@ -87,7 +87,12 @@ enum Verb {
     /// Review threads of a pull or merge request.
     Threads { number: u64 },
     /// The timeline of a pull request or issue.
-    Timeline { number: u64 },
+    Timeline {
+        number: u64,
+        /// Read the issue instead of the pull or merge request.
+        #[arg(long)]
+        issue: bool,
+    },
     /// The unified diff of a pull or merge request.
     Diff { number: u64 },
     /// CI runs, pipelines on GitLab (JSON Lines).
@@ -510,7 +515,14 @@ fn run(cli: &ForgeCli, cancel: &AtomicBool) -> Result<Output, Failure> {
         Verb::Pr { number } => Read::PullRequest(*number),
         Verb::Issue { number } => Read::Issue(*number),
         Verb::Threads { number } => Read::Threads(*number),
-        Verb::Timeline { number } => Read::Timeline(*number),
+        Verb::Timeline { number, issue } => Read::Timeline {
+            kind: if *issue {
+                ItemKind::Issue
+            } else {
+                ItemKind::PullRequest
+            },
+            number: *number,
+        },
         Verb::Diff { number } => Read::Diff(*number),
         Verb::Runs {
             branch,
@@ -582,7 +594,8 @@ fn write_verb(cli: &ForgeCli, write: Write, cancel: &AtomicBool) -> Result<Outpu
         "ok": true,
         "summary": receipt.summary,
         "web_url": receipt.web_url,
-        "created_number": receipt.created_number,
+        "created_number": receipt.created_item.map(|(_, number)| number),
+        "created_kind": receipt.created_item.map(|(kind, _)| kind),
     }))))
 }
 

@@ -420,12 +420,7 @@ fn check_issue(world: &World, forge: Forge, pull: u64, issue: u64) {
             .contains("### Steps to reproduce"),
         "{detail}"
     );
-    if forge == Forge::GitLab {
-        // `timeline N` names no kind and a new process remembers none: GitLab reads the merge
-        // request's notes. The contract suite reads this issue's timeline in one process.
-        return;
-    }
-    let timeline = read(world, &["timeline", &number]);
+    let timeline = read(world, &["timeline", &number, "--issue"]);
     let events = events(&timeline);
     let said = comments(&events);
     assert!(said.len() >= 5, "five comments or more: {timeline}");

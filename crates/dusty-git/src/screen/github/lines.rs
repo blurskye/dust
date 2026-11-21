@@ -708,7 +708,7 @@ mod tests {
             (workspace.list_key(), json!([item.clone()])),
             (Key::Item(page, 7), item),
             (
-                Key::Timeline(7),
+                Key::timeline(super::super::item_kind(page), 7),
                 json!([[{
                     "event": "labeled", "actor": {"login": "alice"}, "label": {"name": "bug"}
                 }, {
@@ -1548,7 +1548,7 @@ mod tests {
                 });
             }
             workspace.cache.insert(
-                Key::Timeline(7),
+                Key::timeline(super::super::item_kind(page), 7),
                 Ok(Reply {
                     text: String::new(),
                     value: json!([]),

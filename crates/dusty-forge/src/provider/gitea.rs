@@ -1841,7 +1841,9 @@ impl Gitea {
             ],
             Read::Issue(number) => vec![rest(&format!("issues/{number}"))?],
             Read::Fingerprint(number) => vec![rest(&format!("pulls/{number}"))?],
-            Read::Timeline(number) => vec![first(rest(&format!("issues/{number}/timeline"))?)],
+            Read::Timeline { number, .. } => {
+                vec![first(rest(&format!("issues/{number}/timeline"))?)]
+            }
             Read::Threads(number) => vec![first(rest(&format!("pulls/{number}/reviews"))?)],
             Read::Diff(number) => {
                 vec![rest(&format!("pulls/{number}.diff"))?.accept(Accept::Diff)]
@@ -2722,7 +2724,9 @@ impl Gitea {
                 }
                 Payload::Fingerprint(fingerprint)
             }
-            Read::Timeline(number) => Payload::Timeline(Self::timeline(ctx, *number, cancel)?),
+            Read::Timeline { number, .. } => {
+                Payload::Timeline(Self::timeline(ctx, *number, cancel)?)
+            }
             Read::Threads(number) => Payload::Threads(Self::review_threads(ctx, *number, cancel)?),
             Read::Viewed(number) => {
                 Payload::Viewed(load_viewed(ctx, *number).into_iter().collect())
@@ -3438,7 +3442,7 @@ impl Provider for Gitea {
             return Ok(Receipt {
                 summary: "Saved on this computer".into(),
                 web_url: None,
-                created_number: None,
+                created_item: None,
                 invalidates,
             });
         }
@@ -3485,8 +3489,11 @@ impl Provider for Gitea {
         Ok(Receipt {
             summary: "Saved".into(),
             web_url: optional(&last, "html_url"),
-            created_number: match write {
-                Write::CreateIssue { .. } | Write::CreatePullRequest(_) => last["number"].as_u64(),
+            created_item: match write {
+                Write::CreateIssue { .. } => last["number"].as_u64().map(|n| (ItemKind::Issue, n)),
+                Write::CreatePullRequest(_) => {
+                    last["number"].as_u64().map(|n| (ItemKind::PullRequest, n))
+                }
                 _ => None,
             },
             invalidates,

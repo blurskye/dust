@@ -338,7 +338,13 @@ fn list_search_detail_run_and_repository_shapes_carry_exactly_the_gh_fields() {
 #[test]
 fn rest_and_graphql_page_shapes_match_the_old_gh_api_output() {
     let parity = Parity::new();
-    let (timeline, _) = legacy::encode(Shape::Timeline, &parity.read(Read::Timeline(7)));
+    let (timeline, _) = legacy::encode(
+        Shape::Timeline,
+        &parity.read(Read::Timeline {
+            kind: ItemKind::PullRequest,
+            number: 7,
+        }),
+    );
     let old = parity.old_json(&[
         "api",
         "repos/example/demo/issues/7/timeline",

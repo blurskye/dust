@@ -212,7 +212,14 @@ fn contract(world: &World, via: Via) -> Vec<String> {
     assert_eq!(pull.linked_issues[0].number, 7);
     seen.push(format!("{pull:?}"));
 
-    let Payload::Timeline(timeline) = read(&ctx, Read::Timeline(7)).unwrap() else {
+    let Payload::Timeline(timeline) = read(
+        &ctx,
+        Read::Timeline {
+            kind: ItemKind::PullRequest,
+            number: 7,
+        },
+    )
+    .unwrap() else {
         panic!()
     };
     assert_eq!(timeline.len(), 1);

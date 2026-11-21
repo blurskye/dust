@@ -543,7 +543,10 @@ pub fn sample_reads() -> Vec<Read> {
         Read::PullRequest(1),
         Read::Issue(1),
         Read::Fingerprint(1),
-        Read::Timeline(1),
+        Read::Timeline {
+            kind: ItemKind::PullRequest,
+            number: 1,
+        },
         Read::Threads(1),
         Read::Diff(1),
         Read::CommitDiff("HEAD".into()),

@@ -113,15 +113,14 @@ pub(super) fn fetch(
                     .collect(),
             )
         }),
-        Read::Timeline(number) => {
-            let kind = recall(ctx, *number);
+        Read::Timeline { kind, number } => {
             let field = match kind {
                 ItemKind::PullRequest => "mergeRequest",
                 ItemKind::Issue => "issue",
             };
             connection(
                 ctx,
-                &notes_document(kind),
+                &notes_document(*kind),
                 json!({ "iid": number.to_string() }),
                 &[field, "notes"],
                 cancel,
@@ -136,24 +135,21 @@ pub(super) fn fetch(
                 )
             })
         }
-        Read::Threads(number) => {
-            remember(ctx, *number, ItemKind::PullRequest);
-            connection(
-                ctx,
-                &discussions_document(),
-                json!({ "iid": number.to_string() }),
-                &["mergeRequest", "discussions"],
-                cancel,
+        Read::Threads(number) => connection(
+            ctx,
+            &discussions_document(),
+            json!({ "iid": number.to_string() }),
+            &["mergeRequest", "discussions"],
+            cancel,
+        )
+        .map(|nodes| {
+            Payload::Threads(
+                nodes
+                    .iter()
+                    .filter_map(|discussion| thread(*number, &discussion_value(discussion)))
+                    .collect(),
             )
-            .map(|nodes| {
-                Payload::Threads(
-                    nodes
-                        .iter()
-                        .filter_map(|discussion| thread(*number, &discussion_value(discussion)))
-                        .collect(),
-                )
-            })
-        }
+        }),
         Read::Job(id) => job(ctx, id, cancel).map(|job| Payload::Job(Box::new(job))),
         _ => return None,
     })

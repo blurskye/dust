@@ -1236,10 +1236,10 @@ impl Workspace {
         let page_of = |kind: &ItemKind| if *kind == ItemKind::Issue { 1 } else { 2 };
         let mut edits: Vec<(Key, Edit)> = Vec::new();
         match write {
-            Write::Comment { number, body, .. } => {
+            Write::Comment { kind, number, body } => {
                 let body = body.clone();
                 edits.push((
-                    Key::Timeline(*number),
+                    Key::timeline(*kind, *number),
                     Box::new(move |timeline| {
                         let event = serde_json::json!({
                             "event": "commented",

@@ -502,9 +502,66 @@ fn a_slow_read_on_one_tab_does_not_delay_another_tabs_paint() {
     forge_fake::update(&state, |state| state["slow_paths"] = json!({}));
 }
 
-/// GitLab numbers issues and merge requests apart, and a timeline read names only the number.
+#[test]
+fn gitlab_readers_keep_same_number_conversations_separate() {
+    if let Some((_, repo)) = child() {
+        let issue_first = std::env::var("DUSTY_TEST_ISSUE_FIRST").as_deref() == Ok("1");
+        let mut screen = GitScreen::open(&repo).unwrap();
+        let issue_comment = "Can you share the worker log around the reconnect?";
+        let mr_comment = "Thanks, the named cap reads much better. Approving.";
+        for issue in [issue_first, !issue_first, issue_first] {
+            let (page, title, comment, other, count) = if issue {
+                (
+                    "issues",
+                    "#15 Queue stalls",
+                    issue_comment,
+                    mr_comment,
+                    "6 comments",
+                )
+            } else {
+                (
+                    "mrs",
+                    "!15 Clamp exponential",
+                    mr_comment,
+                    issue_comment,
+                    "Conversation 15",
+                )
+            };
+            screen.open_target(page, Some(15));
+            let start = Instant::now();
+            let text = loop {
+                screen.poll();
+                let frame = screen.frame(190, 140);
+                let text = (0..140)
+                    .map(|y| frame.grid.row_text(y))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                if screen.forge_quiet() && text.contains(title) && !loading(&text) {
+                    break text;
+                }
+                assert!(start.elapsed() < DEADLINE, "{page} never loaded");
+                std::thread::yield_now();
+            };
+            assert!(text.contains(comment), "{page}: missing {comment:?}");
+            assert!(!text.contains(other), "{page}: showed {other:?}");
+            assert!(text.contains(count), "{page}: missing {count:?}");
+        }
+        return;
+    }
+    for issue_first in ["0", "1"] {
+        let forge = Forge::GitLab;
+        let world = World::with_state(forge, json!({"conversation": {"pull": 15, "issue": 15}}));
+        rerun_in_child_with(
+            "gitlab_readers_keep_same_number_conversations_separate",
+            &world,
+            forge,
+            &[("DUSTY_TEST_ISSUE_FIRST", issue_first)],
+        );
+    }
+}
+
 /// After a restart that restores an issue from the disk cache without reading it again, its
-/// timeline is read as the issue's (`issues/14/notes`), never guessed to be a merge request's.
+/// timeline still reads the issue's notes, not the merge request's.
 #[test]
 fn a_restored_gitlab_issue_reads_an_issues_timeline() {
     if let Some((forge, repo)) = child() {

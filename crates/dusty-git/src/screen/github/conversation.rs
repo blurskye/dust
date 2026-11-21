@@ -1274,7 +1274,7 @@ pub(super) fn issue(
             TimelineEntry::Review { .. } => {}
         }
     }
-    if workspace.value(&Key::Timeline(number)).is_none() {
+    if workspace.value(&Key::IssueTimeline(number)).is_none() {
         rows.push(blank());
         rows.push(muted("Loading the conversation…"));
     }

@@ -77,7 +77,7 @@ pub fn kind(read: &Read) -> &'static str {
         Read::ArtifactFile { .. } => "artifact_file",
         Read::Issue(_) => "issue",
         Read::Fingerprint(_) => "fingerprint",
-        Read::Timeline(_) => "timeline",
+        Read::Timeline { .. } => "timeline",
         Read::Threads(_) => "threads",
         Read::Diff(_) => "diff",
         Read::CommitDiff(_) => "commit_diff",

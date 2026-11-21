@@ -82,7 +82,7 @@ fn loading_or_error(workspace: &Workspace, key: &Key, rows: &mut Vec<Line>) -> b
 /// Every comment and event of the issue, oldest first.
 pub(super) fn entries(workspace: &Workspace, id: u64) -> Vec<TimelineEntry> {
     workspace
-        .value(&Key::Timeline(id))
+        .value(&Key::IssueTimeline(id))
         .map(records::timeline)
         .unwrap_or_default()
 }

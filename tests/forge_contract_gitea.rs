@@ -531,7 +531,12 @@ pub fn issue_timeline_and_threads(harness: &Harness) {
     assert_eq!(issue.row.kind, Some(ItemKind::Issue));
     assert!(!issue.body.is_empty());
     let timeline = expect!(
-        harness.read(Read::Timeline(harness.family.pull())).unwrap(),
+        harness
+            .read(Read::Timeline {
+                kind: ItemKind::PullRequest,
+                number: harness.family.pull()
+            })
+            .unwrap(),
         Payload::Timeline
     );
     assert!(
@@ -998,7 +1003,10 @@ fn transports_agree(family: Family) {
         list(ItemKind::PullRequest, "", 20),
         list(ItemKind::Issue, "", 10),
         Read::PullRequest(family.pull()),
-        Read::Timeline(family.pull()),
+        Read::Timeline {
+            kind: ItemKind::PullRequest,
+            number: family.pull(),
+        },
         Read::Threads(family.pull()),
         Read::Runs {
             filter: RunFilter::default(),

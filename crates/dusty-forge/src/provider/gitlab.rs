@@ -1452,16 +1452,6 @@ fn viewers() -> &'static Mutex<HashMap<String, String>> {
     VIEWERS.get_or_init(Default::default)
 }
 
-/// GitLab numbers issues and merge requests separately, but `Read::Timeline(n)` names no kind:
-/// the timeline follows the item last read under that number.
-/// (host, repository, number) → the kind last read under that number.
-type Kinds = HashMap<(String, String, u64), ItemKind>;
-
-fn kinds() -> &'static Mutex<Kinds> {
-    static KINDS: OnceLock<Mutex<Kinds>> = OnceLock::new();
-    KINDS.get_or_init(Default::default)
-}
-
 /// Probed capabilities (request changes, draft notes) per host, mirrored into `hosts.json`.
 fn probes() -> &'static Mutex<HashMap<(String, &'static str), bool>> {
     static PROBES: OnceLock<Mutex<HashMap<(String, &'static str), bool>>> = OnceLock::new();
@@ -1470,85 +1460,6 @@ fn probes() -> &'static Mutex<HashMap<(String, &'static str), bool>> {
 
 fn lock<T>(mutex: &'static Mutex<T>) -> std::sync::MutexGuard<'static, T> {
     mutex.lock().unwrap_or_else(|error| error.into_inner())
-}
-
-fn kind_key(ctx: &ForgeContext, number: u64) -> (String, String, u64) {
-    (
-        ctx.host().to_string(),
-        ctx.repo
-            .as_ref()
-            .map(super::RepoRef::full)
-            .unwrap_or_default(),
-        number,
-    )
-}
-
-fn remember(ctx: &ForgeContext, number: u64, kind: ItemKind) {
-    lock(kinds()).insert(kind_key(ctx, number), kind);
-}
-
-fn recall(ctx: &ForgeContext, number: u64) -> ItemKind {
-    lock(kinds())
-        .get(&kind_key(ctx, number))
-        .copied()
-        .unwrap_or(ItemKind::PullRequest)
-}
-
-/// What the screen knows the item under `number` is (the tab it reads it from), for the
-/// timeline read that names only the number.
-pub fn note_kind(ctx: &ForgeContext, number: u64, kind: ItemKind) {
-    remember(ctx, number, kind);
-}
-
-/// After an item read: its kind kept in the disk cache (`item_kind`), so a timeline read
-/// after a restart follows the kind read last time instead of guessing.
-pub fn keep_kind(ctx: &ForgeContext, cache: &crate::cache::Cache, number: u64) {
-    keep_in(cache, kind_key(ctx, number));
-}
-
-/// Before a timeline read: the kind kept on disk, when this process has not read the item.
-pub fn restore_kind(ctx: &ForgeContext, cache: &crate::cache::Cache, number: u64) {
-    restore_in(cache, kind_key(ctx, number));
-}
-
-const KIND_TTL: Duration = Duration::from_secs(30 * 24 * 3600);
-
-fn kind_entry(key: &(String, String, u64)) -> crate::cache::CacheKey {
-    let repo = Some(key.1.as_str()).filter(|repo| !repo.is_empty());
-    crate::cache::CacheKey::named(&key.0, repo, "item_kind", &key.2.to_string())
-}
-
-fn kind_name(kind: ItemKind) -> &'static str {
-    if kind == ItemKind::Issue {
-        "issue"
-    } else {
-        "pull_request"
-    }
-}
-
-fn keep_in(cache: &crate::cache::Cache, key: (String, String, u64)) {
-    let Some(kind) = lock(kinds()).get(&key).copied() else {
-        return;
-    };
-    let entry = kind_entry(&key);
-    let kept = cache.get::<String>(&entry).map(|envelope| envelope.data);
-    if kept.as_deref() != Some(kind_name(kind)) {
-        cache.store(&entry, kind_name(kind), KIND_TTL, None, None);
-    }
-}
-
-fn restore_in(cache: &crate::cache::Cache, key: (String, String, u64)) {
-    if lock(kinds()).contains_key(&key) {
-        return;
-    }
-    if let Some(envelope) = cache.get::<String>(&kind_entry(&key)) {
-        let kind = if envelope.data == "issue" {
-            ItemKind::Issue
-        } else {
-            ItemKind::PullRequest
-        };
-        lock(kinds()).insert(key, kind);
-    }
 }
 
 fn observed(ctx: &ForgeContext, capability: &'static str) -> Option<bool> {
@@ -1885,8 +1796,8 @@ impl GitLab {
                 rest(&format!("issues/{number}/closed_by"))?,
                 paged(&format!("issues/{number}/award_emoji"))?,
             ],
-            Read::Timeline(number) => {
-                let item = item_path(recall(ctx, *number), *number);
+            Read::Timeline { kind, number } => {
+                let item = item_path(*kind, *number);
                 vec![
                     paged(&format!("{item}/notes"))?
                         .query("sort", "asc")
@@ -2100,7 +2011,6 @@ impl GitLab {
                 })
             }
             Read::PullRequest(number) => {
-                remember(ctx, *number, ItemKind::PullRequest);
                 let pull = Self::merge_request(ctx, *number, requests, cancel)?;
                 let fingerprint = Some(pull.fingerprint.clone());
                 return Ok(Fetched::Payload {
@@ -2109,16 +2019,14 @@ impl GitLab {
                     fingerprint,
                 });
             }
-            Read::Fingerprint(number) => {
-                remember(ctx, *number, ItemKind::PullRequest);
+            Read::Fingerprint(_) => {
                 let fingerprint = fingerprint(&ctx.json(&requests[0], cancel)?);
                 if cond.fingerprint.as_ref() == Some(&fingerprint) {
                     return Ok(Fetched::NotModified);
                 }
                 Payload::Fingerprint(fingerprint)
             }
-            Read::Issue(number) => {
-                remember(ctx, *number, ItemKind::Issue);
+            Read::Issue(_) => {
                 // The issue, what closes it and its reactions: one round trip for all three.
                 let (value, closed_by, awards) = std::thread::scope(|scope| {
                     let closed_by = scope.spawn(|| Self::optional_list(ctx, &requests[1], cancel));
@@ -2130,7 +2038,7 @@ impl GitLab {
                 issue.reactions = reactions::gitlab(&Value::Array(awards?));
                 Payload::Issue(Box::new(issue))
             }
-            Read::Timeline(_) => {
+            Read::Timeline { .. } => {
                 let mut events = Self::rest_pages(ctx, requests.remove(0), cancel)?
                     .0
                     .iter()
@@ -2148,16 +2056,13 @@ impl GitLab {
                 events.sort_by_key(|event| event_time(event).unwrap_or(i64::MAX));
                 Payload::Timeline(events)
             }
-            Read::Threads(number) => {
-                remember(ctx, *number, ItemKind::PullRequest);
-                Payload::Threads(
-                    Self::rest_pages(ctx, requests.remove(0), cancel)?
-                        .0
-                        .iter()
-                        .filter_map(|discussion| thread(*number, discussion))
-                        .collect(),
-                )
-            }
+            Read::Threads(number) => Payload::Threads(
+                Self::rest_pages(ctx, requests.remove(0), cancel)?
+                    .0
+                    .iter()
+                    .filter_map(|discussion| thread(*number, discussion))
+                    .collect(),
+            ),
             Read::Diff(number) => {
                 let files = match Self::rest_pages(ctx, requests.remove(0), cancel) {
                     Ok((files, _)) => files,
@@ -2962,11 +2867,10 @@ impl GitLab {
         let saved = |summary: &str| Receipt {
             summary: summary.into(),
             web_url: None,
-            created_number: None,
+            created_item: None,
             invalidates: invalidates.clone(),
         };
         let item = |kind: ItemKind, number: u64| -> Result<Value, ForgeError> {
-            remember(ctx, number, kind);
             ctx.json(
                 &ApiRequest::get(Self::project(ctx, &item_path(kind, number))?),
                 cancel,
@@ -2991,11 +2895,10 @@ impl GitLab {
                     &ApiRequest::new(Method::Post, Self::project(ctx, "issues")?).json(payload),
                     cancel,
                 )?;
-                remember(ctx, count(&created, "iid"), ItemKind::Issue);
                 Ok(Receipt {
                     summary: "Saved".into(),
                     web_url: optional(&created, "web_url"),
-                    created_number: created["iid"].as_u64(),
+                    created_item: created["iid"].as_u64().map(|n| (ItemKind::Issue, n)),
                     invalidates,
                 })
             }
@@ -3033,12 +2936,11 @@ impl GitLab {
                 Ok(Receipt {
                     summary: "Saved".into(),
                     web_url: optional(&created, "web_url"),
-                    created_number: created["iid"].as_u64(),
+                    created_item: created["iid"].as_u64().map(|n| (ItemKind::PullRequest, n)),
                     invalidates,
                 })
             }
             Write::Comment { kind, number, body } => {
-                remember(ctx, *number, *kind);
                 let request = Self::write_requests(ctx, write)?.remove(0);
                 let note = ctx.json(&request, cancel)?;
                 Ok(Receipt {
@@ -3388,42 +3290,6 @@ impl Provider for GitLab {
 mod tests {
     use super::*;
     use crate::credential::Env;
-
-    #[test]
-    fn an_items_kind_outlives_a_restart_in_the_disk_cache() {
-        let root = tempfile::tempdir().unwrap();
-        let cache = crate::cache::Cache::at(root.path());
-        let key = (
-            "gitlab.example".to_string(),
-            "group/kind-test".to_string(),
-            41,
-        );
-        let recalled = |key: &(String, String, u64)| lock(kinds()).get(key).copied();
-        lock(kinds()).insert(key.clone(), ItemKind::Issue);
-        keep_in(&cache, key.clone());
-        // A restart: the process forgets, the disk does not.
-        lock(kinds()).remove(&key);
-        restore_in(&cache, key.clone());
-        assert_eq!(recalled(&key), Some(ItemKind::Issue));
-        // Read as a merge request since: that is what a later timeline follows.
-        lock(kinds()).insert(key.clone(), ItemKind::PullRequest);
-        keep_in(&cache, key.clone());
-        lock(kinds()).remove(&key);
-        restore_in(&cache, key.clone());
-        assert_eq!(recalled(&key), Some(ItemKind::PullRequest));
-        // What this process knows wins over the disk.
-        lock(kinds()).insert(key.clone(), ItemKind::Issue);
-        restore_in(&cache, key.clone());
-        assert_eq!(recalled(&key), Some(ItemKind::Issue));
-        // Nothing known anywhere: nothing restored (the read falls back as before).
-        let unknown = (
-            "gitlab.example".to_string(),
-            "group/kind-test".to_string(),
-            42,
-        );
-        restore_in(&cache, unknown.clone());
-        assert_eq!(recalled(&unknown), None);
-    }
     use crate::transport::HostKey;
 
     fn ctx() -> ForgeContext {

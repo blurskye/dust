@@ -53,7 +53,9 @@ enum Key {
     List(usize, String, String),
     Inbox(String, usize, String, String),
     Item(usize, u64),
+    /// Pull/merge request timeline; issues have their own number space on GitLab.
     Timeline(u64),
+    IssueTimeline(u64),
     Threads(u64),
     Viewed(u64),
     Diff(u64),
@@ -70,6 +72,14 @@ enum Key {
     ArtifactFiles(u64),
     Write,
     WorktreeWrite(u64),
+}
+impl Key {
+    fn timeline(kind: ItemKind, number: u64) -> Self {
+        match kind {
+            ItemKind::Issue => Self::IssueTimeline(number),
+            ItemKind::PullRequest => Self::Timeline(number),
+        }
+    }
 }
 struct Reply {
     text: String,
@@ -101,22 +111,23 @@ impl Request {
         }
     }
 }
+fn item_kind(page: usize) -> ItemKind {
+    if page == 1 {
+        ItemKind::Issue
+    } else {
+        ItemKind::PullRequest
+    }
+}
+
 /// The gh command output a key's legacy value stands in for (`forge::legacy`).
 fn shape(key: &Key) -> Shape {
-    let kind = |page: usize| {
-        if page == 1 {
-            ItemKind::Issue
-        } else {
-            ItemKind::PullRequest
-        }
-    };
     match key {
         Key::Repository => Shape::Repository,
         Key::PullRequestDefaults => Shape::RepositoryRest,
-        Key::List(page, ..) => Shape::List(kind(*page)),
-        Key::Inbox(_, page, ..) => Shape::Search(kind(*page)),
+        Key::List(page, ..) => Shape::List(item_kind(*page)),
+        Key::Inbox(_, page, ..) => Shape::Search(item_kind(*page)),
         Key::Item(..) => Shape::Detail,
-        Key::Timeline(_) => Shape::Timeline,
+        Key::Timeline(_) | Key::IssueTimeline(_) => Shape::Timeline,
         Key::Threads(_) => Shape::Threads,
         Key::Viewed(_) => Shape::Viewed,
         Key::Workflows => Shape::Workflows,
@@ -582,6 +593,7 @@ impl Workspace {
                 key,
                 Key::Item(..)
                     | Key::Timeline(_)
+                    | Key::IssueTimeline(_)
                     | Key::Threads(_)
                     | Key::Diff(_)
                     | Key::Viewed(_)
@@ -847,9 +859,9 @@ impl Workspace {
             }
             Key::Item(page, id) => *page == self.page && *id == self.number(),
             Key::Timeline(id) => {
-                *id == self.number()
-                    && (self.page == 1 || self.page == 2 && matches!(self.pr_tab, 0 | 4))
+                self.page == 2 && *id == self.number() && matches!(self.pr_tab, 0 | 4)
             }
+            Key::IssueTimeline(id) => self.page == 1 && *id == self.number(),
             Key::Threads(id) => {
                 self.page == 2 && *id == self.number() && matches!(self.pr_tab, 0 | 3 | 4 | 5)
             }
@@ -908,6 +920,7 @@ impl Workspace {
                     request.key,
                     Key::Item(..)
                         | Key::Timeline(_)
+                        | Key::IssueTimeline(_)
                         | Key::Threads(_)
                         | Key::Diff(_)
                         | Key::Viewed(_)
@@ -993,14 +1006,18 @@ impl Workspace {
                 {
                     return;
                 }
-                let item = if self.page == 1 {
-                    Read::Issue(id)
-                } else {
-                    Read::PullRequest(id)
+                let kind = item_kind(self.page);
+                let item = match kind {
+                    ItemKind::Issue => Read::Issue(id),
+                    ItemKind::PullRequest => Read::PullRequest(id),
                 };
                 self.enqueue(Key::Item(self.page, id), self.read(item), refresh);
                 if self.page == 1 || matches!(self.pr_tab, 0 | 4) {
-                    self.enqueue(Key::Timeline(id), self.read(Read::Timeline(id)), refresh);
+                    self.enqueue(
+                        Key::timeline(kind, id),
+                        self.read(Read::Timeline { kind, number: id }),
+                        refresh,
+                    );
                 }
                 if self.page == 2 {
                     if self.pr_tab == 1
@@ -1130,6 +1147,21 @@ impl Workspace {
                 ForgeReply::Written(write, result) => {
                     changed = true;
                     self.accounts.observe(&self.host, result.as_ref().err());
+                    if let (Op::Write(target, _), Ok(receipt)) = (&request.op, &result)
+                        && *target == self.target()
+                    {
+                        for read in &receipt.invalidates {
+                            if let Read::Timeline { kind, number } = read {
+                                let key = Key::timeline(*kind, *number);
+                                // The visible reader refreshes below. An off-screen reader's
+                                // cached conversation must not outlive a write to that item.
+                                if !self.wanted(&key) {
+                                    self.cache.remove(&key);
+                                    self.fresh.meta.remove(&key);
+                                }
+                            }
+                        }
+                    }
                     self.written(&write, result.map_err(|error| error.to_string()));
                     self.ensure(refresh);
                 }
@@ -1183,21 +1215,10 @@ impl Workspace {
             };
             let scope = (self.host.clone(), self.repo.clone(), self.scope_epoch);
             let background = self.fresh.implicit.contains(&request.key);
-            // The tab says what the numbered item is; the timeline read is told, not left to
-            // guess from whatever was read last under that number (GitLab).
-            let kind = match (&request.key, self.page) {
-                (Key::Timeline(_), 1) => Some(ItemKind::Issue),
-                (Key::Timeline(_), 2) => Some(ItemKind::PullRequest),
-                _ => None,
-            };
-            if let Err((request, error)) = self.active.start(
-                self.root.clone(),
-                request,
-                conditional,
-                scope,
-                background,
-                kind,
-            ) {
+            if let Err((request, error)) =
+                self.active
+                    .start(self.root.clone(), request, conditional, scope, background)
+            {
                 if self.cache.get(&request.key).is_some_and(Result::is_ok) {
                     let age = self
                         .fresh
@@ -1225,7 +1246,7 @@ impl Workspace {
                 if let Write::CreatePullRequest(pr) = write {
                     self.change_repository(pr.base_repository.clone(), pr.host.clone());
                     self.cache.clear();
-                    if let Some(number) = receipt.created_number {
+                    if let Some((ItemKind::PullRequest, number)) = receipt.created_item {
                         self.opened = Some((2, number));
                         self.focus = 2;
                         self.detail_cursor = 0;
