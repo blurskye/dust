@@ -16,7 +16,7 @@ static ENABLED: AtomicBool = AtomicBool::new(false);
 static WRITES: AtomicU64 = AtomicU64::new(0);
 
 /// The format; an entry of another version is ignored.
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 /// History lines kept: more than any screen shows.
 const HISTORY_LINES: usize = 200;
 /// The revision of a status read from the disk cache: never one the status worker gives, so
@@ -92,7 +92,7 @@ pub(super) struct Warm {
     /// `git log`'s first lines, as History reads them.
     history: String,
     refs: Option<GitBranchList>,
-    stashes: Vec<String>,
+    stashes: Vec<StashEntry>,
     tags: Vec<String>,
     remotes: Vec<String>,
 }

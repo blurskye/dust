@@ -157,6 +157,7 @@ impl Jobs {
                 | Request::StagedNumstat
                 | Request::StagedPatch
                 | Request::Reflog
+                | Request::Stashes
                 | Request::CommitInfo
         ) {
             let ids = self

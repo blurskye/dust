@@ -87,6 +87,11 @@ enum FormAction {
     RemoveWorktree(String),
     Reference(refs::Action),
     Confirm(Vec<OsString>),
+    ConfirmStash {
+        action: &'static str,
+        reference: String,
+        id: String,
+    },
     Discard(Box<GitResetHunkRequest>),
     /// Changes-pane `d`/`D`: whole files' worktree changes, captured when the sheet opened.
     DiscardFiles(Box<staging::FileDiscard>),
@@ -106,6 +111,37 @@ enum FormAction {
         rebase_identity: Option<RebaseIdentity>,
     },
 }
+#[derive(Clone, Hash, serde::Serialize, serde::Deserialize)]
+struct StashEntry {
+    reference: String,
+    id: String,
+    subject: String,
+}
+
+impl StashEntry {
+    fn parse(line: &str) -> Option<Self> {
+        let mut fields = line.splitn(3, '\t');
+        let reference = fields.next()?.strip_prefix("refs/")?;
+        Some(Self {
+            reference: reference.into(),
+            id: fields.next()?.into(),
+            subject: fields.next()?.into(),
+        })
+    }
+}
+
+/// Split the reflog subject into the branch and message shown in the Stashes pane.
+fn stash_parts(subject: &str) -> (&str, &str) {
+    subject
+        .split_once(": ")
+        .map_or(("", subject), |(on, message)| {
+            (
+                on.trim_start_matches("WIP on ").trim_start_matches("On "),
+                message,
+            )
+        })
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct RebaseIdentity {
     backend: &'static str,
@@ -394,7 +430,7 @@ pub struct GitScreen {
     /// Keep identity-bound recovery/reference forms until the worker accepts the effect.
     reflog_submitting: bool,
     history_target: Option<(PathBuf, OsString)>,
-    stashes: Vec<String>,
+    stashes: Vec<StashEntry>,
     tags: Vec<String>,
     remotes: Vec<String>,
     focus: usize,
@@ -738,7 +774,12 @@ impl GitScreen {
             _ => self
                 .stashes
                 .iter()
-                .map(|r| plain(r.clone(), r.split(':').next().unwrap_or(r).into()))
+                .map(|stash| {
+                    plain(
+                        format!("{}: {}", stash.reference, stash.subject),
+                        stash.reference.as_str().into(),
+                    )
+                })
                 .collect(),
         };
         if pane == 0 && self.files_view == 0 {
@@ -751,6 +792,11 @@ impl GitScreen {
         self.rows(self.last_list)
             .get(self.selected[self.slot(self.last_list)])
             .cloned()
+    }
+    fn stash_for_row(&self, row: &Row) -> Option<&StashEntry> {
+        self.stashes
+            .iter()
+            .find(|stash| row.value == Path::new(&stash.reference))
     }
     fn preview_staged(&self) -> bool {
         self.selected_row()
@@ -829,13 +875,21 @@ impl GitScreen {
                     "--",
                 ],
             ),
-            (Request::Stashes, vec!["stash", "list"]),
             (Request::Tags, vec!["tag", "--list"]),
             (Request::Remotes, vec!["remote", "-v"]),
         ] {
             self.run(request, args.into_iter().map(Into::into).collect())?;
         }
-        Ok(())
+        self.reload_stashes()
+    }
+    fn reload_stashes(&mut self) -> Result<(), String> {
+        self.run(
+            Request::Stashes,
+            ["stash", "list", "--format=%gD%x09%H%x09%gs"]
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+        )
     }
     fn refresh_head_context(&mut self) {
         let repository = git2::Repository::open(&self.root).ok();
@@ -1184,7 +1238,7 @@ impl GitScreen {
                 (Request::StagedPatch, Ok(text)) => self.staged_patch = text,
                 (Request::StagedPatch, Err(_)) => self.staged_patch.clear(),
                 (Request::Stashes, Ok(text)) => {
-                    self.stashes = text.lines().map(Into::into).collect();
+                    self.stashes = text.lines().filter_map(StashEntry::parse).collect();
                     reload_preview |= self.last_list == 3;
                 }
                 (Request::Files, Ok(text)) => {
@@ -1454,15 +1508,20 @@ impl GitScreen {
                 ]
             }
 
-            _ => vec![
-                "stash".into(),
-                "show".into(),
-                "--include-untracked".into(),
-                "--no-ext-diff".into(),
-                "--no-textconv".into(),
-                "--patch".into(),
-                row.value.into_os_string(),
-            ],
+            _ => {
+                let Some(stash) = self.stash_for_row(&row) else {
+                    return;
+                };
+                vec![
+                    "stash".into(),
+                    "show".into(),
+                    "--include-untracked".into(),
+                    "--no-ext-diff".into(),
+                    "--no-textconv".into(),
+                    "--patch".into(),
+                    stash.id.as_str().into(),
+                ]
+            }
         };
         self.load_git_preview(args);
     }
@@ -2111,6 +2170,25 @@ impl GitScreen {
             }
             FormAction::Reference(action) => self.submit_reference(action.clone(), &values)?,
             FormAction::Confirm(args) => self.write(args.clone())?,
+            FormAction::ConfirmStash {
+                action,
+                reference,
+                id,
+            } => {
+                // Drop and pop need the reflog selector, not just the commit. Resolve
+                // the fully qualified selector again before any stash write.
+                let current = git2::Repository::open(&self.root).and_then(|repo| {
+                    repo.revparse_single(reference)
+                        .map(|object| object.id().to_string())
+                });
+                if !current.is_ok_and(|current| current == *id) {
+                    self.form = None;
+                    let _ = self.reload_stashes();
+                    return Err("The stash list changed. Pick the stash again.".into());
+                }
+                let args = vec!["stash".into(), (*action).into(), reference.into()];
+                self.write(args)?;
+            }
             FormAction::Run(op) => {
                 let reads = !op.writes();
                 self.submit_op(op.as_ref().clone(), &values)?;
@@ -2986,19 +3064,25 @@ impl GitScreen {
                             ],
                         ),
                         KeyCode::Char('a' | 'p' | 'd') if self.focus == 3 => {
-                            if let Some(row) = self.selected_row() {
+                            if let Some(stash) =
+                                self.selected_row().and_then(|row| self.stash_for_row(&row))
+                            {
                                 let action = match key.code {
                                     KeyCode::Char('a') => "apply",
                                     KeyCode::Char('p') => "pop",
                                     _ => "drop",
                                 };
                                 self.form(
-                                    &format!("{} {}?", action, row.value.display()),
-                                    FormAction::Confirm(vec![
-                                        "stash".into(),
-                                        action.into(),
-                                        row.value.into_os_string(),
-                                    ]),
+                                    &format!(
+                                        "{action} {} \"{}\"?",
+                                        stash.reference,
+                                        stash_parts(&stash.subject).1,
+                                    ),
+                                    FormAction::ConfirmStash {
+                                        action,
+                                        reference: format!("refs/{}", stash.reference),
+                                        id: stash.id.clone(),
+                                    },
                                     Vec::new(),
                                 );
                             }
@@ -3417,6 +3501,77 @@ mod context_tests {
         repository.set_head(selected).unwrap();
         let current = RefPreviewContext::capture(&repository, selected, other).unwrap();
         assert!(current.selected_is_current && current.head_at_tip);
+    }
+
+    #[test]
+    fn stash_drop_confirmation_refuses_a_replaced_stash() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        let mut repository = git2::Repository::init(root).unwrap();
+        let signature = git2::Signature::now("Stash test", "stash@example.invalid").unwrap();
+        let file = root.join("tracked.txt");
+        std::fs::write(&file, "base\n").unwrap();
+        let mut index = repository.index().unwrap();
+        index.add_path(Path::new("tracked.txt")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        {
+            let tree = repository.find_tree(tree_id).unwrap();
+            repository
+                .commit(Some("HEAD"), &signature, &signature, "Base", &tree, &[])
+                .unwrap();
+        }
+        std::fs::write(&file, "original\n").unwrap();
+        let a = repository
+            .stash_save(&signature, "QA original A", None)
+            .unwrap();
+
+        let mut screen = GitScreen::open(root).unwrap();
+        let key = |code| UiEvent::Key {
+            key: KeyEvent::plain(code),
+            kind: KeyInputKind::Press,
+        };
+        let wait_for_stashes = |screen: &mut GitScreen, count| {
+            let deadline = std::time::Instant::now() + Duration::from_secs(20);
+            while screen.stashes.len() != count {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "Stashes did not reload"
+                );
+                screen.poll();
+                std::thread::yield_now();
+            }
+        };
+        wait_for_stashes(&mut screen, 1);
+        screen.event(key(KeyCode::Char('5')));
+        screen.event(key(KeyCode::Char('d')));
+        let title = screen.form.as_ref().unwrap().title.clone();
+
+        std::fs::write(&file, "newer\n").unwrap();
+        let b = repository
+            .stash_save(&signature, "QA newer B", None)
+            .unwrap();
+
+        screen.event(key(KeyCode::Enter));
+        assert!(
+            !screen.busy,
+            "Confirming started a write against the new stash"
+        );
+        assert!(screen.form.is_none());
+        assert_eq!(
+            screen.notice,
+            "The stash list changed. Pick the stash again."
+        );
+        let mut remaining = Vec::new();
+        repository
+            .stash_foreach(|_, _, id| {
+                remaining.push(*id);
+                true
+            })
+            .unwrap();
+        assert_eq!(remaining, [b, a]);
+        wait_for_stashes(&mut screen, 2);
+        assert_eq!(title, "drop stash@{0} \"QA original A\"?");
     }
 
     #[test]

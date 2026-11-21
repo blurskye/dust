@@ -828,18 +828,8 @@ fn stash_row(
     let y = rect.y;
     let right = rect.right();
     // `stash@{0}: On fix/backoff: WIP reconnect`
-    let mut parts = row.label.splitn(3, ": ");
-    let reference = parts.next().unwrap_or_default();
-    let (branch, message) = match (parts.next(), parts.next()) {
-        (Some(on), Some(message)) => (
-            on.trim_start_matches("WIP on ")
-                .trim_start_matches("On ")
-                .to_owned(),
-            message.to_owned(),
-        ),
-        (Some(message), None) => (String::new(), message.to_owned()),
-        _ => (String::new(), String::new()),
-    };
+    let (reference, subject) = row.label.split_once(": ").unwrap_or((&row.label, ""));
+    let (branch, message) = super::super::stash_parts(subject);
     let index = reference
         .strip_prefix("stash@")
         .unwrap_or(reference)
@@ -854,21 +844,21 @@ fn stash_row(
     let x = grid.put_text_clipped(x, y, &index, st(GitRole::Hash, surface), right) + 1;
     // The branch is dropped before the message is cut.
     let room = usize::from(right.saturating_sub(x + 1));
-    let branch = if chrome::width(&message) as usize + chrome::width(&branch) as usize + 2 > room {
-        String::new()
+    let branch = if chrome::width(message) as usize + chrome::width(branch) as usize + 2 > room {
+        ""
     } else {
         branch
     };
     let branch_width = if branch.is_empty() {
         0
     } else {
-        chrome::width(&branch).min(14) + 1
+        chrome::width(branch).min(14) + 1
     };
     let message_right = right.saturating_sub(branch_width + 1);
     grid.put_text_clipped(
         x,
         y,
-        &chrome::ellipsize(&message, usize::from(message_right.saturating_sub(x))),
+        &chrome::ellipsize(message, usize::from(message_right.saturating_sub(x))),
         st(GitRole::Text, surface),
         message_right,
     );
@@ -876,7 +866,7 @@ fn stash_row(
         grid.put_text_clipped(
             right.saturating_sub(branch_width),
             y,
-            &chrome::ellipsize_start(&branch, 14),
+            &chrome::ellipsize_start(branch, 14),
             st(GitRole::Ref, surface),
             right,
         );
